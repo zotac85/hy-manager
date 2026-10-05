@@ -319,6 +319,10 @@ check_cert() {
     fi
     echo ""
     DAYS_LEFT=$(( ($(date -d "$(openssl x509 -in /h-ui/bin/certs/domain.crt -noout -enddate | cut -d= -f2)" +%s) - $(date +%s)) / 86400 ))
+    echo -e "${RED}⚠️  ВАЖНО: После продления сертификата отпечаток МЕНЯЕТСЯ!${NC}"
+    echo -e "${YELLOW}   Обновите pinSHA256 в клиентском ключе (Happ/Nekoray).${NC}"
+    echo -e "${YELLOW}   Старый отпечаток перестанет работать после перезапуска Hysteria.${NC}"
+    echo ""
     echo -e "${CYAN}=== Полные пути для панели h-ui ===${NC}"
     echo -e "${YELLOW}Поле cert:${NC} /h-ui/bin/certs/domain.crt"
     echo -e "${YELLOW}Поле key:${NC}  /h-ui/bin/certs/domain.key"
