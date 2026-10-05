@@ -25,6 +25,17 @@ log "Установка базовых утилит..."
 apt install -y -qq curl wget git nano ufw fail2ban certbot openssl
 
 # ============================================================
+# ============================================================
+#  2.5. Освобождаем порт 53 (отключаем systemd-resolved)
+# ============================================================
+log "Отключение systemd-resolved (освобождаем порт 53)..."
+systemctl stop systemd-resolved 2>/dev/null || true
+systemctl disable systemd-resolved 2>/dev/null || true
+chattr -i /etc/resolv.conf 2>/dev/null || true
+rm -f /etc/resolv.conf 2>/dev/null || true
+printf "nameserver 1.1.1.1\nnameserver 8.8.8.8\n" > /etc/resolv.conf
+echo ""
+
 #  3. Docker
 # ============================================================
 if ! command -v docker &> /dev/null; then
