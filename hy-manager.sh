@@ -239,6 +239,92 @@ free_port_53() {
     fi
 }
 
+# ---------- 15. Установить сертификат Let's Encrypt ----------
+install_cert_letsencrypt() {
+    echo -e "${CYAN}>>> Установка сертификата Let's Encrypt...${NC}"
+    if ! command -v certbot &> /dev/null; then
+        echo -e "${YELLOW}Установка certbot...${NC}"
+        apt install -y certbot > /dev/null 2>&1
+    fi
+    echo -e "${YELLOW}Введите домен (например, example.com):${NC}"
+    read -r DOMAIN
+    if [ -z "$DOMAIN" ]; then
+        echo -e "${RED}Домен не указан.${NC}"; return
+    fi
+    echo -e "${YELLOW}Останавливаем Hysteria (освобождаем порт 80)...${NC}"
+    pkill -f "$HYSTERIA_PROC"
+    sleep 2
+    echo -e "${CYAN}Получаем сертификат...${NC}"
+    certbot certonly --standalone -d "$DOMAIN" --non-interactive --agree-tos --register-unsafely-without-email
+    if [ ! -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ]; then
+        echo -e "${RED}Не удалось получить сертификат.${NC}"
+        echo -e "${YELLOW}Проверьте, что домен указывает на этот IP и порт 80 открыт.${NC}"
+        return
+    fi
+    mkdir -p /h-ui/bin/certs
+    cp "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" /h-ui/bin/certs/domain.crt
+    cp "/etc/letsencrypt/live/$DOMAIN/privkey.pem" /h-ui/bin/certs/domain.key
+    chmod 644 /h-ui/bin/certs/domain.crt
+    chmod 600 /h-ui/bin/certs/domain.key
+    echo -e "${GREEN}Сертификат установлен в /h-ui/bin/certs/${NC}"
+    echo -e "${CYAN}Настраиваем автопродление (cron)...${NC}"
+    cat > /etc/cron.d/certbot-renew << 'CRON'
+0 3 * * * root certbot renew --quiet --deploy-hook "cp $RENEWED_LINEAGE/fullchain.pem /h-ui/bin/certs/domain.crt && cp $RENEWED_LINEAGE/privkey.pem /h-ui/bin/certs/domain.key && pkill -f hysteria-linux"
+CRON
+    echo -e "${GREEN}Автопродление настроено (проверка ежедневно в 3:00).${NC}"
+    echo -e "${YELLOW}Hysteria перезапустится сама через панель h-ui.${NC}"
+}
+
+# ---------- 16. Создать самоподписанный сертификат ----------
+install_cert_selfsigned() {
+    echo -e "${CYAN}>>> Создание самоподписанного сертификата...${NC}"
+    echo -e "${YELLOW}Введите домен (CN сертификата):${NC}"
+    read -r DOMAIN
+    [ -z "$DOMAIN" ] && DOMAIN="www.icloud.com"
+    mkdir -p /h-ui/bin/certs
+    echo -e "${CYAN}Генерация ключа и сертификата...${NC}"
+    openssl ecparam -genkey -name prime256v1 -out /h-ui/bin/certs/domain.key
+    openssl req -new -x509 -days 3650 -key /h-ui/bin/certs/domain.key -out /h-ui/bin/certs/domain.crt -subj "/CN=$DOMAIN"
+    chmod 644 /h-ui/bin/certs/domain.crt
+    chmod 600 /h-ui/bin/certs/domain.key
+    echo -e "${GREEN}Сертификат создан на 10 лет (CN=$DOMAIN).${NC}"
+    echo -e "${CYAN}Отпечаток для клиента:${NC}"
+    openssl x509 -in /h-ui/bin/certs/domain.crt -noout -fingerprint -sha256 | sed "s/://g"
+    echo -e "${YELLOW}Hysteria перезапустится сама через панель h-ui.${NC}"
+}
+
+# ---------- 17. Проверить сертификат ----------
+check_cert() {
+    echo -e "${CYAN}>>> Информация о сертификате${NC}"
+    if [ ! -f /h-ui/bin/certs/domain.crt ]; then
+        echo -e "${RED}Сертификат /h-ui/bin/certs/domain.crt не найден!${NC}"; return
+    fi
+    echo ""
+    echo -e "${YELLOW}=== Subject / Issuer ===${NC}"
+    openssl x509 -in /h-ui/bin/certs/domain.crt -noout -subject -issuer
+    echo ""
+    echo -e "${YELLOW}=== Срок действия ===${NC}"
+    openssl x509 -in /h-ui/bin/certs/domain.crt -noout -dates
+    echo ""
+    echo -e "${YELLOW}=== Отпечаток SHA-256 (pinSHA256 для клиента) ===${NC}"
+    openssl x509 -in /h-ui/bin/certs/domain.crt -noout -fingerprint -sha256 | sed "s/://g"
+    echo ""
+    echo -e "${YELLOW}=== Проверка соответствия ключа ===${NC}"
+    CRT_HASH=$(openssl x509 -in /h-ui/bin/certs/domain.crt -noout -pubkey | openssl sha256)
+    KEY_HASH=$(openssl ec -in /h-ui/bin/certs/domain.key -pubout 2>/dev/null | openssl sha256)
+    if [ "$CRT_HASH" = "$KEY_HASH" ]; then
+        echo -e "${GREEN}Сертификат и ключ совпадают.${NC}"
+    else
+        echo -e "${RED}Сертификат и ключ НЕ совпадают!${NC}"
+    fi
+    echo ""
+    DAYS_LEFT=$(( ($(date -d "$(openssl x509 -in /h-ui/bin/certs/domain.crt -noout -enddate | cut -d= -f2)" +%s) - $(date +%s)) / 86400 ))
+    echo -e "${YELLOW}Осталось дней: $DAYS_LEFT${NC}"
+    if [ "$DAYS_LEFT" -lt 30 ]; then
+        echo -e "${RED}Сертификат скоро истечёт! Обновите его.${NC}"
+    fi
+}
+
 # ---------- МЕНЮ ----------
 show_menu() {
     clear
@@ -261,6 +347,10 @@ show_menu() {
     echo -e "${MAGENTA}12) Бэкап конфигов${NC}"
     echo -e "${MAGENTA}13) Проверить маскировку${NC}"
     echo -e "${MAGENTA}14) Освободить порт 53${NC}"
+echo -e "${CYAN}--- Сертификаты ---${NC}"
+echo -e "${GREEN}15) Установить сертификат Let's Encrypt${NC}"
+echo -e "${GREEN}16) Создать самоподписанный сертификат${NC}"
+echo -e "${GREEN}17) Проверить сертификат${NC}"
     echo ""
     echo -e "${RED} 0) Выход${NC}"
     echo -e "${CYAN}============================================================${NC}"
@@ -281,6 +371,9 @@ show_menu() {
         12) backup_config; pause ;;
         13) check_masquerade; pause ;;
         14) free_port_53; pause ;;
+        15) install_cert_letsencrypt; pause ;;
+        16) install_cert_selfsigned; pause ;;
+        17) check_cert; pause ;;
         0)  exit 0 ;;
         *)  echo -e "${RED}Неверный выбор!${NC}"; sleep 1 ;;
     esac
