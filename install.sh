@@ -45,7 +45,7 @@ if docker ps -a --format '{{.Names}}' | grep -q '^h-ui$'; then
     warn "Контейнер h-ui уже существует"
 else
     docker run -d --name h-ui --restart=always \
-      -p 8888:8888 \
+      --network host \
       -v /h-ui/bin:/h-ui/bin \
       -v /h-ui/data:/h-ui/data \
       -v /h-ui/logs:/h-ui/logs \
