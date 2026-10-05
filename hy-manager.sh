@@ -319,6 +319,10 @@ check_cert() {
     fi
     echo ""
     DAYS_LEFT=$(( ($(date -d "$(openssl x509 -in /h-ui/bin/certs/domain.crt -noout -enddate | cut -d= -f2)" +%s) - $(date +%s)) / 86400 ))
+    echo -e "${CYAN}=== Полные пути для панели h-ui ===${NC}"
+    echo -e "${YELLOW}Поле cert:${NC} /h-ui/bin/certs/domain.crt"
+    echo -e "${YELLOW}Поле key:${NC}  /h-ui/bin/certs/domain.key"
+    echo ""
     echo -e "${YELLOW}Осталось дней: $DAYS_LEFT${NC}"
     if [ "$DAYS_LEFT" -lt 30 ]; then
         echo -e "${RED}Сертификат скоро истечёт! Обновите его.${NC}"
