@@ -37,9 +37,9 @@ edit_config() {
 # ---------- 3. Перезапуск ----------
 restart_hysteria() {
     echo -e "${CYAN}>>> Перезапуск Hysteria...${NC}"
-    pkill -f "$HYSTERIA_PROC"
+    docker restart h-ui
     sleep 3
-    if pgrep -f "$HYSTERIA_PROC" > /dev/null; then
+    if docker ps | grep -q h-ui; then
         echo -e "${GREEN}Hysteria успешно перезапущена (h-ui поднял процесс).${NC}"
     else
         echo -e "${RED}Процесс не запустился. Перезапустите панель h-ui вручную.${NC}"
@@ -49,7 +49,7 @@ restart_hysteria() {
 # ---------- 4. Статус ----------
 status_hysteria() {
     echo -e "${CYAN}>>> Статус Hysteria:${NC}"
-    if pgrep -f "$HYSTERIA_PROC" > /dev/null; then
+    if docker ps | grep -q h-ui; then
         echo -e "${GREEN}Работает${NC}"
         ps aux | grep "$HYSTERIA_PROC" | grep -v grep
     else
@@ -252,7 +252,7 @@ install_cert_letsencrypt() {
         echo -e "${RED}Домен не указан.${NC}"; return
     fi
     echo -e "${YELLOW}Останавливаем Hysteria (освобождаем порт 80)...${NC}"
-    pkill -f "$HYSTERIA_PROC"
+    docker restart h-ui
     sleep 2
     echo -e "${CYAN}Получаем сертификат...${NC}"
     certbot certonly --standalone -d "$DOMAIN" --non-interactive --agree-tos --register-unsafely-without-email
