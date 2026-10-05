@@ -39,7 +39,7 @@ fi
 #  4. h-ui (Docker)
 # ============================================================
 log "Разворачиваем h-ui..."
-mkdir -p /h-ui/{bin,data,logs,export}
+mkdir -p /h-ui/{bin,bin/certs,data,logs,export}
 
 if docker ps -a --format '{{.Names}}' | grep -q '^h-ui$'; then
     warn "Контейнер h-ui уже существует"
