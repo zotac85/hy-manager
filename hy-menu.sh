@@ -532,6 +532,78 @@ remove_hui() {
 }
 
 # ---------- Удаление Mimic ----------
+install_mimic() {
+    log "Установка Mimic (eBPF UDP->TCP)..."
+
+    log "Обновляем список пакетов..."
+    DEBIAN_FRONTEND=noninteractive apt update -qq < /dev/null
+
+    log "Устанавливаем mimic и mimic-dkms..."
+    DEBIAN_FRONTEND=noninteractive apt install -y mimic mimic-dkms < /dev/null
+
+    if ! command -v mimic &> /dev/null; then
+        err "❌ Пакет mimic не найден в репозиториях"
+        warn "Проверьте, что у вас Ubuntu 24.04+ или Debian 12+"
+        return 1
+    fi
+
+    log "Загрузка модуля ядра mimic..."
+    modprobe mimic 2>/dev/null || true
+    echo "mimic" > /etc/modules-load.d/mimic.conf 2>/dev/null
+
+    log "✅ Mimic установлен"
+    mimic --version 2>/dev/null || true
+}
+
+enable_mimic() {
+    if ! command -v mimic &> /dev/null; then
+        err "Mimic не установлен. Сначала установите (пункт 1)."
+        return 1
+    fi
+    if [ ! -f /etc/hysteria/config.yaml ]; then
+        err "Конфиг /etc/hysteria/config.yaml не найден!"
+        return 1
+    fi
+    if grep -q "^mimic:" /etc/hysteria/config.yaml; then
+        warn "Mimic уже включён в конфиге"
+        return 0
+    fi
+    log "Добавляем блок mimic в конфиг..."
+    cp /etc/hysteria/config.yaml /etc/hysteria/config.yaml.bak
+    printf "\nmimic:\n  enabled: true\n" >> /etc/hysteria/config.yaml
+    log "Перезапуск Hysteria..."
+    systemctl restart hysteria-server
+    sleep 3
+    if systemctl is-active --quiet hysteria-server; then
+        log "✅ Mimic включён, Hysteria перезапущена"
+    else
+        err "❌ Hysteria не запустилась. Логи:"
+        journalctl -u hysteria-server -n 15 --no-pager
+    fi
+}
+
+disable_mimic() {
+    if [ ! -f /etc/hysteria/config.yaml ]; then
+        err "Конфиг не найден!"
+        return 1
+    fi
+    if ! grep -q "^mimic:" /etc/hysteria/config.yaml; then
+        warn "Mimic не включён в конфиге"
+        return 0
+    fi
+    log "Отключаем Mimic в конфиге..."
+    cp /etc/hysteria/config.yaml /etc/hysteria/config.yaml.bak
+    sed -i '/^mimic:/,/^  enabled:/d' /etc/hysteria/config.yaml
+    log "Перезапуск Hysteria..."
+    systemctl restart hysteria-server
+    sleep 3
+    if systemctl is-active --quiet hysteria-server; then
+        log "✅ Mimic отключён, Hysteria перезапущена"
+    else
+        err "❌ Hysteria не запустилась. Восстановите: cp /etc/hysteria/config.yaml.bak /etc/hysteria/config.yaml"
+    fi
+}
+
 remove_mimic() {
     warn "Будет удалено: пакеты Mimic, модуль ядра, блок в конфиге"
     read -p "  Продолжить? (y/n): " A
