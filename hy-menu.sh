@@ -90,7 +90,7 @@ get_cert() {
     chmod 644 /etc/hysteria/cert.pem
     chmod 600 /etc/hysteria/key.pem
     if id "hysteria" &>/dev/null; then
-        chown -R hysteria:hysteria /etc/hysteria/
+        fix_perm
     fi
     log "Сертификат установлен (домен: $NEW_DOMAIN)"
 
@@ -136,7 +136,7 @@ masquerade:
   forceHTTPS: true
 EOF
     if id "hysteria" &>/dev/null; then
-        chown -R hysteria:hysteria /etc/hysteria/
+        fix_perm
     fi
     log "Конфиг создан: /etc/hysteria/config.yaml"
 }
