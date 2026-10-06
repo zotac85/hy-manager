@@ -476,6 +476,87 @@ edit_config() {
     fi
 }
 
+
+# ---------- Удаление Hysteria2 ----------
+remove_hysteria() {
+    warn "Будет удалено: Hysteria2, сервис, конфиг, сертификаты"
+    read -p "  Продолжить? (y/n): " A
+    [ "$A" != "y" ] && return
+    systemctl stop hysteria-server 2>/dev/null || true
+    systemctl disable hysteria-server 2>/dev/null || true
+    rm -f /usr/local/bin/hysteria
+    rm -f /etc/systemd/system/hysteria-server*.service
+    rm -rf /etc/hysteria
+    systemctl daemon-reload
+    log "Hysteria2 удалена"
+}
+
+# ---------- Удаление h-ui ----------
+remove_hui() {
+    warn "Будет удалено: h-ui, сервис, файлы"
+    read -p "  Продолжить? (y/n): " A
+    [ "$A" != "y" ] && return
+    systemctl stop h-ui 2>/dev/null || true
+    systemctl disable h-ui 2>/dev/null || true
+    rm -f /etc/systemd/system/h-ui.service
+    rm -rf /usr/local/h-ui
+    systemctl daemon-reload
+    log "h-ui удалена"
+}
+
+# ---------- Удаление Mimic ----------
+remove_mimic() {
+    warn "Будет удалено: пакеты Mimic, модуль ядра, блок в конфиге"
+    read -p "  Продолжить? (y/n): " A
+    [ "$A" != "y" ] && return
+    if [ -f /etc/hysteria/config.yaml ] && grep -q "^mimic:" /etc/hysteria/config.yaml; then
+        sed -i '/^mimic:/,/^  enabled:/d' /etc/hysteria/config.yaml
+        systemctl restart hysteria-server 2>/dev/null
+    fi
+    apt purge -y mimic mimic-dkms > /dev/null 2>&1 || true
+    apt autoremove -y > /dev/null 2>&1 || true
+    rmmod mimic 2>/dev/null || true
+    rm -f /etc/modules-load.d/mimic.conf
+    log "Mimic удалён"
+}
+
+# ---------- Удаление UFW ----------
+remove_ufw() {
+    warn "Будет отключён и удалён UFW"
+    read -p "  Продолжить? (y/n): " A
+    [ "$A" != "y" ] && return
+    ufw --force disable 2>/dev/null || true
+    apt purge -y ufw > /dev/null 2>&1 || true
+    apt autoremove -y > /dev/null 2>&1 || true
+    log "UFW удалён"
+}
+
+# ---------- Удаление Fail2Ban ----------
+remove_fail2ban() {
+    warn "Будет удалён Fail2Ban"
+    read -p "  Продолжить? (y/n): " A
+    [ "$A" != "y" ] && return
+    systemctl stop fail2ban 2>/dev/null || true
+    systemctl disable fail2ban 2>/dev/null || true
+    apt purge -y fail2ban > /dev/null 2>&1 || true
+    rm -rf /etc/fail2ban
+    apt autoremove -y > /dev/null 2>&1 || true
+    log "Fail2Ban удалён"
+}
+
+# ---------- Удаление Certbot ----------
+remove_certbot() {
+    warn "Будет удалено: Certbot, сертификаты, cron автопродления"
+    read -p "  Продолжить? (y/n): " A
+    [ "$A" != "y" ] && return
+    rm -f /etc/cron.d/certbot-renew
+    rm -rf /etc/letsencrypt
+    rm -f /etc/hysteria/cert.pem /etc/hysteria/key.pem
+    apt purge -y certbot > /dev/null 2>&1 || true
+    apt autoremove -y > /dev/null 2>&1 || true
+    log "Certbot и сертификаты удалены"
+}
+
 # ============================================================
 #  АВТОСЕТАП
 # ============================================================
@@ -509,17 +590,34 @@ show_menu() {
     clear
     echo -e "${CYAN}============================================================${NC}"
     echo -e "${CYAN}           Hysteria2 Manager v3.0${NC}"
-    echo -e "${CYAN}============================================================${NC}"
+    # --- Индикаторы статуса ---
+    local H_ST="❌"; systemctl is-active --quiet hysteria-server 2>/dev/null && H_ST="✅"
+    local U_ST="❌"; systemctl is-active --quiet h-ui 2>/dev/null && U_ST="✅"
+    local M_ST="❌"; command -v mimic &>/dev/null && M_ST="✅"
+    local W_ST="❌"; ufw status 2>/dev/null | grep -q "Status: active" && W_ST="✅"
+    local F_ST="❌"; systemctl is-active --quiet fail2ban 2>/dev/null && F_ST="✅"
+    echo -e "${CYAN}------------------------------------------------------------${NC}"
+    echo -e "  Hy:${H_ST}  h-ui:${U_ST}  Mimic:${M_ST}  UFW:${W_ST}  F2B:${F_ST}"
+    echo -e "${CYAN}------------------------------------------------------------${NC}"
     echo ""
     echo -e "${GREEN}🚀 БЫСТРЫЙ СТАРТ${NC}"
     echo -e "  1) Полный автосетап (без UFW/Fail2Ban)"
-    echo ""
+    # Определяем статусы
+    local ST_HY="❌"; systemctl is-active --quiet hysteria-server 2>/dev/null && ST_HY="✅"
+    local ST_HUI="❌"; systemctl is-active --quiet h-ui 2>/dev/null && ST_HUI="✅"
+    local ST_MIMIC="❌"; command -v mimic &>/dev/null && ST_MIMIC="✅"
+    local ST_CERT="❌"; [ -f /etc/hysteria/cert.pem ] && ST_CERT="✅"
+    local ST_UFW="❌"; ufw status 2>/dev/null | grep -q "Status: active" && ST_UFW="✅"
+    local ST_F2B="❌"; systemctl is-active --quiet fail2ban 2>/dev/null && ST_F2B="✅"
+
     echo -e "${YELLOW}⚙️  УСТАНОВКА${NC}"
     echo -e "  2) Установить Hysteria2"
     echo -e "  3) Освободить порт 53"
     echo -e "  4) Получить/обновить сертификат"
     echo -e "  5) Создать конфиг"
-    echo -e "  6) Установить панель h-ui (systemd, без Docker)"
+    echo -e "  6) Установить панель h-ui"
+    echo -e "  6.1) Установить Mimic"
+    echo -e "  6.2) Включить Mimic в конфиге"
     echo ""
     echo -e "${MAGENTA}🔧 УПРАВЛЕНИЕ${NC}"
     echo -e "  7) Запустить Hysteria"
@@ -531,7 +629,7 @@ show_menu() {
     echo -e "${CYAN}🛡️  БЕЗОПАСНОСТЬ${NC}"
     echo -e " 12) Настроить UFW"
     echo -e " 13) Установить и настроить Fail2Ban"
-    echo -e " 14) Настроить автопродление сертификата"
+    echo -e " 14) Настроить автопродление"
     echo ""
     echo -e "${GREEN}⚡ ИЗМЕНЕНИЕ ПАРАМЕТРОВ${NC}"
     echo -e " 15) Сменить SNI"
@@ -544,8 +642,16 @@ show_menu() {
     echo -e " 20) Показать ключ для Happ"
     echo ""
     echo -e "${MAGENTA}📝 РЕДАКТИРОВАНИЕ${NC}"
-    echo -e " 21) Редактировать конфиг вручную (nano)"
+    echo -e " 27) Редактировать конфиг (nano)"
     echo ""
+    echo -e "${RED}🗑️  УДАЛЕНИЕ${NC}"
+    echo -e " 21) Удалить Hysteria2"
+    echo -e " 22) Удалить h-ui"
+    echo -e " 23) Удалить Mimic"
+    echo -e " 24) Удалить UFW"
+    echo -e " 25) Удалить Fail2Ban"
+    echo -e " 26) Удалить Certbot"
+
     echo -e "${RED} 0) Выход${NC}"
     echo -e "${CYAN}============================================================${NC}"
     echo "  Домен: $DOMAIN"
@@ -581,6 +687,13 @@ show_menu() {
         18) check_masq; pause ;;
         19) show_fingerprint; pause ;;
         20) show_key; pause ;;
+        27) edit_config; pause ;;
+        21) remove_hysteria; pause ;;
+        22) remove_hui; pause ;;
+        23) remove_mimic; pause ;;
+        24) remove_ufw; pause ;;
+        25) remove_fail2ban; pause ;;
+        26) remove_certbot; pause ;;
         21) edit_config; pause ;;
         0)  exit 0 ;;
         *)  echo -e "${RED}Неверный выбор${NC}"; sleep 1 ;;
