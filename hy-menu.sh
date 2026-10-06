@@ -594,125 +594,263 @@ auto_setup() {
 }
 
 # ============================================================
+update_script() {
+    log "Проверка обновлений с GitHub..."
+    local URL="https://raw.githubusercontent.com/zotac85/hy-manager/main/hy-menu.sh"
+    local TMP="/tmp/hy-menu-new.sh"
+    if ! curl -fsSL "$URL" -o "$TMP"; then
+        err "Не удалось скачать скрипт с GitHub"
+        return 1
+    fi
+    if [ ! -s "$TMP" ]; then
+        err "Скачанный файл пустой"
+        return 1
+    fi
+    local OLD_HASH=$(md5sum /usr/local/bin/hy-menu.sh 2>/dev/null | awk '{print $1}')
+    local NEW_HASH=$(md5sum "$TMP" | awk '{print $1}')
+    if [ "$OLD_HASH" = "$NEW_HASH" ]; then
+        log "У вас уже последняя версия"
+        rm -f "$TMP"
+        return 0
+    fi
+    log "Найдена новая версия. Обновляем..."
+    cp /usr/local/bin/hy-menu.sh /usr/local/bin/hy-menu.sh.bak
+    cp "$TMP" /usr/local/bin/hy-menu.sh
+    chmod +x /usr/local/bin/hy-menu.sh
+    ln -sf /usr/local/bin/hy-menu.sh /usr/local/bin/hys
+    rm -f "$TMP"
+    log "✅ Скрипт обновлён. Бэкап: /usr/local/bin/hy-menu.sh.bak"
+    warn "Перезапустите меню: выйдите (0) и запустите hys снова"
+}
+
+hysteria_menu() {
+    while true; do
+        clear
+        echo -e "${CYAN}=== 🔧 Hysteria2 ===${NC}"
+        local st="❌ не работает"; systemctl is-active --quiet hysteria-server 2>/dev/null && st="✅ работает"
+        echo -e "  Статус: $st"
+        echo -e "  Порт 53: $(ss -ulpn 2>/dev/null | grep -q ':53 ' && echo '✅ занят' || echo '❌ свободен')"
+        echo ""
+        echo "  1) Установить"
+        echo "  2) Запустить"
+        echo "  3) Перезапустить"
+        echo "  4) Остановить"
+        echo "  5) Логи (30 строк)"
+        echo "  6) Удалить"
+        echo "  0) Назад"
+        read -p "  Выбор: " c
+        case $c in
+            1) install_hysteria; pause ;;
+            2) systemctl start hysteria-server && log "Запущена"; pause ;;
+            3) systemctl restart hysteria-server && log "Перезапущена"; pause ;;
+            4) systemctl stop hysteria-server && log "Остановлена"; pause ;;
+            5) journalctl -u hysteria-server -n 30 --no-pager; pause ;;
+            6) remove_hysteria; pause ;;
+            0) return ;;
+        esac
+    done
+}
+
+hui_menu() {
+    while true; do
+        clear
+        echo -e "${CYAN}=== 🎛️ Панель h-ui ===${NC}"
+        local st="❌ не установлена"; systemctl is-active --quiet h-ui 2>/dev/null && st="✅ работает"
+        echo -e "  Статус: $st"
+        echo ""
+        echo "  1) Установить"
+        echo "  2) Запустить"
+        echo "  3) Перезапустить"
+        echo "  4) Остановить"
+        echo "  5) Логи"
+        echo "  6) Удалить"
+        echo "  0) Назад"
+        read -p "  Выбор: " c
+        case $c in
+            1) install_hui; pause ;;
+            2) systemctl start h-ui 2>/dev/null && log "Запущена" || err "Не удалось"; pause ;;
+            3) systemctl restart h-ui 2>/dev/null && log "Перезапущена" || err "Не удалось"; pause ;;
+            4) systemctl stop h-ui 2>/dev/null && log "Остановлена" || err "Не удалось"; pause ;;
+            5) journalctl -u h-ui -n 30 --no-pager 2>/dev/null || err "Сервис не найден"; pause ;;
+            6) remove_hui; pause ;;
+            0) return ;;
+        esac
+    done
+}
+
+mimic_menu() {
+    while true; do
+        clear
+        echo -e "${CYAN}=== 🌐 Mimic (UDP→TCP) ===${NC}"
+        local st="❌ не установлен"; command -v mimic &>/dev/null && st="✅ установлен"
+        local cfg="❌ не включён"; grep -q "^mimic:" /etc/hysteria/config.yaml 2>/dev/null && cfg="✅ включён"
+        echo -e "  Пакет: $st"
+        echo -e "  Конфиг: $cfg"
+        echo ""
+        echo "  1) Установить"
+        echo "  2) Включить в конфиге"
+        echo "  3) Отключить в конфиге"
+        echo "  4) Полностью удалить"
+        echo "  0) Назад"
+        read -p "  Выбор: " c
+        case $c in
+            1) install_mimic; pause ;;
+            2) enable_mimic; pause ;;
+            3) disable_mimic; pause ;;
+            4) remove_mimic; pause ;;
+            0) return ;;
+        esac
+    done
+}
+
+security_menu() {
+    while true; do
+        clear
+        echo -e "${CYAN}=== 🛡️ Безопасность ===${NC}"
+        local u="❌ выключен"; ufw status 2>/dev/null | grep -q "Status: active" && u="✅ активен"
+        local f="❌ не работает"; systemctl is-active --quiet fail2ban 2>/dev/null && f="✅ работает"
+        echo -e "  UFW: $u"
+        echo -e "  Fail2Ban: $f"
+        echo ""
+        echo "  1) UFW: настроить"
+        echo "  2) UFW: удалить"
+        echo "  3) Fail2Ban: настроить"
+        echo "  4) Fail2Ban: удалить"
+        echo "  5) Показать статус UFW"
+        echo "  6) Показать статус Fail2Ban"
+        echo "  0) Назад"
+        read -p "  Выбор: " c
+        case $c in
+            1) setup_ufw; pause ;;
+            2) remove_ufw; pause ;;
+            3) setup_fail2ban; pause ;;
+            4) remove_fail2ban; pause ;;
+            5) ufw status verbose; pause ;;
+            6) fail2ban-client status sshd 2>/dev/null || echo "Fail2Ban не запущен"; pause ;;
+            0) return ;;
+        esac
+    done
+}
+
+cert_menu() {
+    while true; do
+        clear
+        echo -e "${CYAN}=== 📜 Сертификаты ===${NC}"
+        if [ -f /etc/hysteria/cert.pem ]; then
+            echo -e "  $(openssl x509 -in /etc/hysteria/cert.pem -noout -subject 2>/dev/null | sed 's/^subject=//')"
+            echo -e "  Истекает: $(openssl x509 -in /etc/hysteria/cert.pem -noout -enddate 2>/dev/null | cut -d= -f2)"
+        else
+            echo -e "  ❌ сертификат не установлен"
+        fi
+        echo ""
+        echo "  1) Получить/обновить Let's Encrypt"
+        echo "  2) Показать отпечаток SHA-256"
+        echo "  3) Настроить автопродление"
+        echo "  4) Удалить Certbot и сертификаты"
+        echo "  0) Назад"
+        read -p "  Выбор: " c
+        case $c in
+            1) get_cert; pause ;;
+            2) show_fingerprint; pause ;;
+            3) setup_renew; pause ;;
+            4) remove_certbot; pause ;;
+            0) return ;;
+        esac
+    done
+}
+
+params_menu() {
+    while true; do
+        clear
+        echo -e "${CYAN}=== ⚙️ Параметры ===${NC}"
+        echo -e "  Домен: $DOMAIN"
+        echo -e "  Порт:  $PORT"
+        echo -e "  SNI:   $SNI"
+        echo -e "  URL:   $MASQ_URL"
+        echo ""
+        echo "  1) Сменить SNI"
+        echo "  2) Сменить URL маскировки"
+        echo "  3) Сменить пароли (auth + obfs)"
+        echo "  0) Назад"
+        read -p "  Выбор: " c
+        case $c in
+            1) change_sni; pause ;;
+            2) change_masq_url; pause ;;
+            3) change_passwords; pause ;;
+            0) return ;;
+        esac
+    done
+}
+
+checks_menu() {
+    while true; do
+        clear
+        echo -e "${CYAN}=== 🔍 Проверки и инфо ===${NC}"
+        echo ""
+        echo "  1) Проверить маскировку"
+        echo "  2) Показать отпечаток сертификата"
+        echo "  3) Показать ключ для Happ (полно)"
+        echo "  0) Назад"
+        read -p "  Выбор: " c
+        case $c in
+            1) check_masq; pause ;;
+            2) show_fingerprint; pause ;;
+            3) show_key; pause ;;
+            0) return ;;
+        esac
+    done
+}
+
 #  МЕНЮ
 # ============================================================
 show_menu() {
     clear
-    echo -e "${CYAN}============================================================${NC}"
-    echo -e "${CYAN}           Hysteria2 Manager v3.0${NC}"
-    # --- Индикаторы статуса ---
     local H_ST="❌"; systemctl is-active --quiet hysteria-server 2>/dev/null && H_ST="✅"
     local U_ST="❌"; systemctl is-active --quiet h-ui 2>/dev/null && U_ST="✅"
     local M_ST="❌"; command -v mimic &>/dev/null && M_ST="✅"
-    local W_ST="❌"; ufw status 2>/dev/null | grep -q "Status: active" && W_ST="✅"
-    local F_ST="❌"; systemctl is-active --quiet fail2ban 2>/dev/null && F_ST="✅"
-    echo -e "${CYAN}------------------------------------------------------------${NC}"
-    echo -e "  Hy:${H_ST}  h-ui:${U_ST}  Mimic:${M_ST}  UFW:${W_ST}  F2B:${F_ST}"
+    local UFW_ST="❌"; ufw status 2>/dev/null | grep -q "Status: active" && UFW_ST="✅"
+    local F2B_ST="❌"; systemctl is-active --quiet fail2ban 2>/dev/null && F2B_ST="✅"
     local IP=$(curl -4 -s --max-time 2 ifconfig.me 2>/dev/null || echo "n/a")
-    local UP=""
-    if systemctl is-active --quiet hysteria-server 2>/dev/null; then
-        UP=$(systemctl show hysteria-server -p ActiveEnterTimestamp --value 2>/dev/null | xargs -I{} date -d {} +"%H:%M" 2>/dev/null)
-        [ -n "$UP" ] && UP="  Hysteria с $UP"
-    fi
-    echo -e "${CYAN}------------------------------------------------------------${NC}"
-    echo -e "  IP: ${GREEN}$IP${NC}  Порт: ${GREEN}$PORT${NC}$UP"
-    echo -e "${CYAN}------------------------------------------------------------${NC}"
-    echo ""
-    echo -e "${GREEN}🚀 БЫСТРЫЙ СТАРТ${NC}"
-    echo -e "  1) Полный автосетап (без UFW/Fail2Ban)"
-    # Определяем статусы
-    local ST_HY="❌"; systemctl is-active --quiet hysteria-server 2>/dev/null && ST_HY="✅"
-    local ST_HUI="❌"; systemctl is-active --quiet h-ui 2>/dev/null && ST_HUI="✅"
-    local ST_MIMIC="❌"; command -v mimic &>/dev/null && ST_MIMIC="✅"
-    local ST_CERT="❌"; [ -f /etc/hysteria/cert.pem ] && ST_CERT="✅"
-    local ST_UFW="❌"; ufw status 2>/dev/null | grep -q "Status: active" && ST_UFW="✅"
-    local ST_F2B="❌"; systemctl is-active --quiet fail2ban 2>/dev/null && ST_F2B="✅"
 
-    echo -e "${YELLOW}⚙️  УСТАНОВКА${NC}"
-    echo -e "  2) Установить Hysteria2"
-    echo -e "  3) Освободить порт 53"
-    echo -e "  4) Получить/обновить сертификат"
-    echo -e "  5) Создать конфиг"
-    echo -e "  6) Установить панель h-ui"
-    echo -e "  6.1) Установить Mimic"
-    echo -e "  6.2) Включить Mimic в конфиге"
+    echo -e "${CYAN}══════════════════════════════════════════════════════════${NC}"
+    echo -e "${CYAN}           Hysteria2 Manager v4.0${NC}"
+    echo -e "${CYAN}══════════════════════════════════════════════════════════${NC}"
+    echo -e "  ${GREEN}IP:${NC} $IP   ${GREEN}Порт:${NC} $PORT   ${GREEN}SNI:${NC} $SNI"
+    echo -e "  Hy:$H_ST  h-ui:$U_ST  Mimic:$M_ST  UFW:$UFW_ST  F2B:$F2B_ST"
+    echo -e "${CYAN}══════════════════════════════════════════════════════════${NC}"
     echo ""
-    echo -e "${MAGENTA}🔧 УПРАВЛЕНИЕ${NC}"
-    echo -e "  7) Запустить Hysteria"
-    echo -e "  8) Перезапустить Hysteria"
-    echo -e "  9) Остановить Hysteria"
-    echo -e " 10) Статус"
-    echo -e " 11) Логи (30 строк)"
+    echo -e "  ${GREEN}1)${NC} 🚀 Полный автосетап"
+    echo -e "  ${GREEN}2)${NC} 🔧 Hysteria2"
+    echo -e "  ${GREEN}3)${NC} 🎛️  Панель h-ui"
+    echo -e "  ${GREEN}4)${NC} 🌐 Mimic (UDP→TCP)"
+    echo -e "  ${GREEN}5)${NC} 🛡️  Безопасность (UFW, Fail2Ban)"
+    echo -e "  ${GREEN}6)${NC} 📜 Сертификаты"
+    echo -e "  ${GREEN}7)${NC} ⚙️  Параметры (SNI, URL, пароли)"
+    echo -e "  ${GREEN}8)${NC} 🔍 Проверки и инфо"
+    echo -e "  ${GREEN}9)${NC} 📝 Редактировать конфиг (nano)"
+    echo -e "  ${GREEN}28)${NC} 🔄 Обновить скрипт из GitHub"
     echo ""
-    echo -e "${CYAN}🛡️  БЕЗОПАСНОСТЬ${NC}"
-    echo -e " 12) Настроить UFW"
-    echo -e " 13) Установить и настроить Fail2Ban"
-    echo -e " 14) Настроить автопродление"
+    echo -e "  ${RED}0)${NC}  Выход"
     echo ""
-    echo -e "${GREEN}⚡ ИЗМЕНЕНИЕ ПАРАМЕТРОВ${NC}"
-    echo -e " 15) Сменить SNI"
-    echo -e " 16) Сменить URL маскировки"
-    echo -e " 17) Сменить пароли (auth + obfs)"
+    echo -e "${CYAN}══════════════════════════════════════════════════════════${NC}"
+    echo -e "${GREEN}🔑 КЛЮЧ ДЛЯ HAPP:${NC}"
     echo ""
-    echo -e "${YELLOW}🔍 ПРОВЕРКИ И ИНФО${NC}"
-    echo -e " 18) Проверить маскировку"
-    echo -e " 19) Показать отпечаток сертификата"
-    echo -e " 20) Показать ключ для Happ"
+    echo -e "${YELLOW}$(key_compact)${NC}"
     echo ""
-    echo -e "${MAGENTA}📝 РЕДАКТИРОВАНИЕ${NC}"
-    echo -e " 27) Редактировать конфиг (nano)"
-    echo ""
-    echo -e "${RED}🗑️  УДАЛЕНИЕ${NC}"
-    echo -e " 21) Удалить Hysteria2"
-    echo -e " 22) Удалить h-ui"
-    echo -e " 23) Удалить Mimic"
-    echo -e " 24) Удалить UFW"
-    echo -e " 25) Удалить Fail2Ban"
-    echo -e " 26) Удалить Certbot"
-
-    echo -e "${RED} 0) Выход${NC}"
-    echo -e "${CYAN}============================================================${NC}"
-    echo "  Домен: $DOMAIN"
-    echo "  Порт:  $PORT"
-    echo "  SNI:   $SNI"
-    echo -e "${CYAN}============================================================${NC}"
-    echo ""
-    echo -e "${GREEN}🔑 ГОТОВЫЙ КЛЮЧ ДЛЯ HAPP:${NC}"
-    echo ""
-    echo -e "${YELLOW}$(show_key_compact)${NC}"
-    echo ""
-    echo -e "${CYAN}============================================================${NC}"
-    read -p "Выберите пункт: " choice
+    echo -e "${CYAN}══════════════════════════════════════════════════════════${NC}"
+    read -p "  Выберите пункт: " choice
 
     case $choice in
         1)  auto_setup; pause ;;
-        2)  install_hysteria; pause ;;
-        3)  free_port_53; pause ;;
-        4)  get_cert; pause ;;
-        5)  create_config; pause ;;
-        6)  install_hui; pause ;;
-        7)  start_hysteria; pause ;;
-        8)  restart_hysteria; pause ;;
-        9)  stop_hysteria; pause ;;
-        10) show_status; pause ;;
-        11) show_logs; pause ;;
-        12) setup_ufw; pause ;;
-        13) setup_fail2ban; pause ;;
-        14) setup_renew; pause ;;
-        15) change_sni; pause ;;
-        16) change_masq_url; pause ;;
-        17) change_passwords; pause ;;
-        18) check_masq; pause ;;
-        19) show_fingerprint; pause ;;
-        20) show_key; pause ;;
-        27) edit_config; pause ;;
-        21) remove_hysteria; pause ;;
-        22) remove_hui; pause ;;
-        23) remove_mimic; pause ;;
-        24) remove_ufw; pause ;;
-        25) remove_fail2ban; pause ;;
-        26) remove_certbot; pause ;;
-        21) edit_config; pause ;;
+        2)  hysteria_menu ;;
+        3)  hui_menu ;;
+        4)  mimic_menu ;;
+        5)  security_menu ;;
+        6)  cert_menu ;;
+        7)  params_menu ;;
+        8)  checks_menu ;;
+        9)  edit_config; pause ;;
+        28) update_script; pause ;;
         0)  exit 0 ;;
         *)  echo -e "${RED}Неверный выбор${NC}"; sleep 1 ;;
     esac
