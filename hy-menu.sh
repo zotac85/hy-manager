@@ -771,12 +771,14 @@ params_menu() {
         echo "  1) Сменить SNI"
         echo "  2) Сменить URL маскировки"
         echo "  3) Сменить пароли (auth + obfs)"
+        echo "  4) Сменить домен (новый сертификат)"
         echo "  0) Назад"
         read -p "  Выбор: " c
         case $c in
             1) change_sni; pause ;;
             2) change_masq_url; pause ;;
             3) change_passwords; pause ;;
+            4) change_domain; pause ;;
             0) return ;;
         esac
     done
@@ -937,6 +939,83 @@ restore_hysteria() {
 }
 
 #  МЕНЮ
+change_domain() {
+    echo ""
+    echo -e "${YELLOW}Текущий домен:${NC} $DOMAIN"
+    echo ""
+    echo "  Шаги:"
+    echo "   1. Новый домен должен указывать A-записью на IP: $(curl -4 -s --max-time 2 ifconfig.me)"
+    echo "   2. Certbot выпустит новый сертификат"
+    echo "   3. Hysteria перезапустится с новым доменом"
+    echo "   4. Ключ для клиентов изменится (старый перестанет работать)"
+    echo ""
+    read -p "  Новый домен (Enter = отмена): " NEW_DOMAIN
+    [ -z "$NEW_DOMAIN" ] && { warn "Отменено"; return; }
+    [ "$NEW_DOMAIN" = "$DOMAIN" ] && { warn "Домен не изменился"; return; }
+
+    # Проверяем DNS
+    log "Проверяем A-запись $NEW_DOMAIN..."
+    local RESOLVED=$(dig +short "$NEW_DOMAIN" 2>/dev/null | head -1)
+    local MY_IP=$(curl -4 -s --max-time 2 ifconfig.me 2>/dev/null)
+    echo "  Домен резолвится в: ${RESOLVED:-не найдено}"
+    echo "  IP этого сервера:   $MY_IP"
+    if [ "$RESOLVED" != "$MY_IP" ]; then
+        warn "Домен НЕ указывает на этот сервер!"
+        read -p "  Продолжить всё равно? (y/n): " C
+        [ "$C" != "y" ] && return
+    fi
+
+    # Останавливаем Hysteria (освобождаем порт 80 для certbot)
+    log "Останавливаем Hysteria..."
+    systemctl stop hysteria-server 2>/dev/null || true
+    sleep 2
+
+    # Получаем сертификат
+    log "Запрашиваем сертификат для $NEW_DOMAIN..."
+    certbot certonly --standalone -d "$NEW_DOMAIN" \
+        --non-interactive --agree-tos --register-unsafely-without-email
+
+    if [ ! -f "/etc/letsencrypt/live/$NEW_DOMAIN/fullchain.pem" ]; then
+        err "Не удалось получить сертификат для $NEW_DOMAIN"
+        warn "Hysteria остаётся на старом домене: $DOMAIN"
+        systemctl start hysteria-server 2>/dev/null
+        return 1
+    fi
+
+    # Копируем сертификаты
+    log "Копируем сертификаты..."
+    cp "/etc/letsencrypt/live/$NEW_DOMAIN/fullchain.pem" /etc/hysteria/cert.pem
+    cp "/etc/letsencrypt/live/$NEW_DOMAIN/privkey.pem" /etc/hysteria/key.pem
+    fix_perm
+
+    # Меняем переменную в скрипте
+    log "Обновляем переменную DOMAIN в скрипте..."
+    DOMAIN="$NEW_DOMAIN"
+    sed -i "s|^DOMAIN=.*|DOMAIN=\"$NEW_DOMAIN\"|" "$(readlink -f "$0")"
+
+    # Перезапускаем Hysteria
+    log "Запускаем Hysteria с новым доменом..."
+    systemctl start hysteria-server
+    sleep 3
+
+    if systemctl is-active --quiet hysteria-server; then
+        log "✅ Домен изменён на: $NEW_DOMAIN"
+        echo ""
+        echo -e "${YELLOW}Новый отпечаток сертификата:${NC}"
+        local FP=$(get_fp)
+        echo "  $FP"
+        echo ""
+        echo -e "${YELLOW}Новый ключ для Happ:${NC}"
+        echo ""
+        echo -e "${GREEN}$(key_compact)${NC}"
+        echo ""
+        warn "Раздайте новый ключ клиентам — старый больше не работает"
+    else
+        err "Hysteria не запустилась с новым доменом"
+        journalctl -u hysteria-server -n 15 --no-pager
+    fi
+}
+
 key_compact() {
     local FP
     FP=$(openssl x509 -noout -fingerprint -sha256 -in /etc/hysteria/cert.pem 2>/dev/null | sed 's/^.*=//' | tr -d ':')
