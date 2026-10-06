@@ -1,222 +1,63 @@
-# Hysteria2 Server Manager
+# Hysteria2 Manager
 
-Скрипт для управления и оптимизации сервера Hysteria2 на Ubuntu/Debian.
+Скрипт для установки и управления Hysteria2 на Ubuntu/Debian.
 
 ## 📦 Установка
 
-Одна команда — установит скрипт и создаст ярлык `hys2`:
+Одна команда:
 
     bash <(curl -fsSL https://raw.githubusercontent.com/zotac85/hy-manager/main/install.sh)
 
-После установки запуск:
+После установки:
 
-    hys2
+    hys
 
-## 🖥️ Возможности менеджера
+## 🖥️ Возможности меню
 
-| № | Действие |
-|---|----------|
-| 1 | Установить / обновить Hysteria2 |
-| 2 | Настроить конфиг Hysteria2 |
-| 3 | Перезапустить Hysteria2 |
-| 4 | Статус Hysteria2 |
-| 5 | Логи Hysteria2 |
-| 6 | Оптимизация сети (sysctl + BBR) |
-| 7 | Настроить UFW (файрвол) |
-| 8 | Настроить Fail2Ban |
-| 9 | Генерировать ECH ключи |
-| 10 | Оптимизация приоритета Hysteria2 |
-| 11 | Показать ECH config для клиента |
-| 12 | Бэкап конфигов |
+### 🚀 Быстрый старт
+- Полный автосетап (Hysteria2 + сертификат + конфиг + автопродление)
 
-## 🚀 Установка Hysteria2 с нуля
+### ⚙️ Установка
+- Установить Hysteria2
+- Освободить порт 53 (отключить systemd-resolved)
+- Получить/обновить сертификат Let's Encrypt
+- Создать конфиг
+- Установить панель h-ui (systemd, без Docker)
 
-1. Установите Hysteria2 (пункт 1 меню `hys2`):
+### 🔧 Управление
+- Запустить / перезапустить / остановить Hysteria
+- Статус
+- Логи
 
-    bash <(curl -fsSL https://get.hy2.sh/)
+### 🛡️ Безопасность
+- Настроить UFW
+- Установить и настроить Fail2Ban
+- Настроить автопродление сертификата
 
-2. Настройте конфиг `/etc/hysteria/config.yaml`:
+### ⚡ Изменение параметров
+- Сменить SNI
+- Сменить URL маскировки
+- Сменить пароли (auth + obfs)
 
-    listen: :53
-    bandwidth:
-      up: 30 mbps
-      down: 30 mbps
-    tls:
-      cert: /etc/hysteria/cert.pem
-      key: /etc/hysteria/key.pem
-    auth:
-      type: password
-      password: "Hs2_auth_ПАРОЛЬ"
-    obfs:
-      type: salamander
-      salamander:
-        password: "Salam_ОБФС_ПАРОЛЬ"
-    masquerade:
-      type: proxy
-      proxy:
-        url: https://www.icloud.com
-        rewriteHost: true
+### 🔍 Проверки и инфо
+- Проверить маскировку
+- Показать отпечаток сертификата
+- Показать ключ для Happ
 
-3. Перезапустите:
+### 📝 Редактирование
+- Редактировать конфиг вручную (nano)
 
-    systemctl restart hysteria-server
-    systemctl enable hysteria-server
+## 🔑 Готовый ключ
 
-## 🔐 Генерация сертификата Let's Encrypt
+Внизу меню всегда отображается готовый ключ для Happ с `pinSHA256`.
 
-    apt install -y certbot
-    certbot certonly --standalone -d your-domain.com
+## 🛠️ После установки
 
-В конфиге Hysteria:
-
-    tls:
-      cert: /etc/letsencrypt/live/your-domain.com/fullchain.pem
-      key: /etc/letsencrypt/live/your-domain.com/privkey.pem
-
-## 💻 Оптимизация сети (пункт 6)
-
-- BBR — современный алгоритм контроля перегрузки TCP
-- fq — честная очередь пакетов
-- Увеличенные буферы UDP (для QUIC)
-- Увеличенные TCP-окна
-- Отключён slow start
-- Увеличены лимиты файловых дескрипторов
-
-Сохраняется в `/etc/sysctl.d/99-hysteria-optimize.conf`.
-
-## 🔥 UFW (пункт 7)
-
-Открывает порты:
-- 22/tcp (или ваш SSH-порт)
-- 53/udp (Hysteria2)
-- 6177/tcp (Hysteria2)
-
-Проверка:
-
-    ufw status verbose
-
-## 🛡️ Fail2Ban (пункт 8)
-
-- Бан на 1 час после 5 неудачных попыток
-- Период наблюдения — 10 минут
-
-Проверка:
-
-    fail2ban-client status sshd
-
-## 🔐 ECH (пункт 9)
-
-Генерирует ключи шифрования SNI. Строку для клиента смотрите в пункте 11.
-Ключи сохраняются в `/etc/hysteria/ech.pem`.
-
-## 📱 Настройка клиента
-
-| Параметр | Значение |
-|----------|----------|
-| Протокол | Hysteria2 |
-| Адрес | Ваш домен или IP |
-| Порт | 53 (или внешний порт из панели) |
-| Пароль | Hs2_auth_ПАРОЛЬ |
-| Обфускация | salamander |
-| Пароль обфускации | Salam_ОБФС_ПАРОЛЬ |
-| SNI | your-domain.com или www.icloud.com |
-| Insecure | включено (для самоподписанных) |
-
-### Ссылка для Happ / Nekoray
-
-    hysteria2://ПАРОЛЬ@ДОМЕН:53/?sni=www.icloud.com&obfs=salamander&obfs-password=ОБФС_ПАРОЛЬ&insecure=1
-
-### JSON-конфиг для sing-box
-
-    {
-      "outbounds": [
-        {
-          "type": "hysteria2",
-          "tag": "Hysteria2",
-          "server": "ВАШ_ДОМЕН",
-          "server_port": 53,
-          "password": "Hs2_auth_ПАРОЛЬ",
-          "obfs": {
-            "type": "salamander",
-            "password": "Salam_ОБФС_ПАРОЛЬ"
-          },
-          "tls": {
-            "enabled": true,
-            "server_name": "www.icloud.com",
-            "insecure": true
-          }
-        }
-      ]
-    }
-
-## 🛠️ Полезные команды
-
-    systemctl status hysteria-server
-    systemctl restart hysteria-server
-    systemctl stop hysteria-server
-    systemctl enable hysteria-server
-    journalctl -u hysteria-server -n 50
-    ss -tulpn | grep hysteria
-    openssl x509 -in /etc/hysteria/cert.pem -noout -fingerprint -sha256
-
-### Swap-файл (для 512 МБ RAM)
-
-    dd if=/dev/zero of=/swapfile bs=1M count=1024
-    chmod 600 /swapfile
-    mkswap /swapfile
-    swapon /swapfile
-    echo '/swapfile none swap sw 0 0' >> /etc/fstab
-    free -h
-
-## 🔄 Обновление скрипта
-
-    cd /root/hy-manager
-    cp /usr/local/bin/hy-manager.sh ./hy-manager.sh
-    git add .
-    git commit -m "Обновление"
-    git push
-
-Обновить на других серверах:
-
-    bash <(curl -fsSL https://raw.githubusercontent.com/zotac85/hy-manager/main/install.sh)
-
-## ⚠️ Важные замечания
-
-- Порт 53 используется для DNS. Отключите systemd-resolved:
-      systemctl stop systemd-resolved
-      systemctl disable systemd-resolved
-
-- UFW может заблокировать SSH. Проверьте, что SSH-порт открыт.
-
-- После ECH перезапустите Hysteria: systemctl restart hysteria-server
-
-- Backup — пункт 12 меню.
+1. Выберите пункт **1** (Полный автосетап)
+2. Дождитесь завершения
+3. Скопируйте ключ из меню и импортируйте в Happ
+4. Подключитесь и проверьте на `2ip.ru`
 
 ## 📄 Лицензия
 
 MIT
-
-## 📌 Обновление v3.0 — работа с h-ui
-
-Скрипт теперь адаптирован под панель h-ui:
-- Конфиг: /h-ui/bin/hysteria2.yaml
-- Перезапуск: через pkill (h-ui поднимает процесс сам)
-- Новые пункты: Проверить маскировку, Освободить порт 53
-
-## 🔔 Важно: смена отпечатка сертификата
-
-**Каждые ~60 дней** Let's Encrypt продлевает сертификат, и его **отпечаток (pinSHA256) меняется**.
-
-Если вы используете самоподписанный сертификат — отпечаток **не меняется** (пока вы сами не пересоздадите сертификат).
-
-**Что делать при смене отпечатка:**
-1. Запустите `hys2` → пункт **17** «Проверить сертификат».
-2. Скопируйте новый **SHA-256 fingerprint** (без двоеточий).
-3. В клиентском ключе (Happ/Nekoray) замените `pinSHA256=...` на новый.
-4. Переимпортируйте ключ в приложение.
-
-**Если не обновить отпечаток:**
-- При включённом `insecure=1` + `pinSHA256` — подключение перестанет работать.
-- Если `pinSHA256` убрать, но оставить `insecure=1` — заработает, но менее безопасно.
-
-**Совет:** раз в месяц заходите в `hys2` → пункт 17, проверяйте срок действия и отпечаток.
