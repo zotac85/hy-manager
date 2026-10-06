@@ -801,6 +801,141 @@ checks_menu() {
     done
 }
 
+backup_hysteria() {
+    local DIR="/root/hysteria-backup"
+    local FILE="/root/hysteria-backup.tar.gz"
+    rm -rf "$DIR" "$FILE"
+    mkdir -p "$DIR"
+    log "Собираем данные..."
+
+    # Конфиг и сертификаты Hysteria
+    [ -f /etc/hysteria/config.yaml ] && cp /etc/hysteria/config.yaml "$DIR/"
+    [ -f /etc/hysteria/cert.pem ] && cp /etc/hysteria/cert.pem "$DIR/"
+    [ -f /etc/hysteria/key.pem ] && cp /etc/hysteria/key.pem "$DIR/"
+
+    # Сервис systemd
+    [ -f /etc/systemd/system/hysteria-server.service ] && \
+        cp /etc/systemd/system/hysteria-server.service "$DIR/"
+
+    # Let's Encrypt
+    if [ -d /etc/letsencrypt ]; then
+        mkdir -p "$DIR/letsencrypt"
+        cp -r /etc/letsencrypt/* "$DIR/letsencrypt/" 2>/dev/null
+    fi
+
+    # h-ui (если установлена)
+    if [ -d /h-ui/data ]; then
+        mkdir -p "$DIR/h-ui-data"
+        cp -r /h-ui/data/* "$DIR/h-ui-data/" 2>/dev/null
+    fi
+    if [ -d /usr/local/h-ui ]; then
+        mkdir -p "$DIR/h-ui-bin"
+        cp -r /usr/local/h-ui/* "$DIR/h-ui-bin/" 2>/dev/null
+    fi
+
+    # Скрипт меню
+    [ -f /usr/local/bin/hy-menu.sh ] && cp /usr/local/bin/hy-menu.sh "$DIR/"
+
+    # Метаданные
+    {
+        echo "Date: $(date)"
+        echo "Hostname: $(hostname)"
+        echo "IP: $(curl -4 -s --max-time 2 ifconfig.me 2>/dev/null || echo 'n/a')"
+        echo "Domain: $DOMAIN"
+        echo "Port: $PORT"
+        echo "SNI: $SNI"
+    } > "$DIR/meta.txt"
+
+    tar czf "$FILE" -C /root hysteria-backup
+    rm -rf "$DIR"
+
+    if [ -f "$FILE" ]; then
+        log "✅ Бэкап создан: $FILE"
+        echo ""
+        echo -e "${YELLOW}Содержимое:${NC}"
+        tar tzf "$FILE" | head -20
+        echo ""
+        echo -e "${YELLOW}Размер:${NC} $(du -h "$FILE" | awk '{print $1}')"
+        echo ""
+        echo -e "${YELLOW}Скачать на компьютер:${NC}"
+        echo "  scp root@$(curl -4 -s --max-time 2 ifconfig.me):$FILE ."
+    else
+        err "Не удалось создать бэкап"
+    fi
+}
+
+restore_hysteria() {
+    local FILE="/root/hysteria-backup.tar.gz"
+    if [ ! -f "$FILE" ]; then
+        err "Файл $FILE не найден!"
+        echo ""
+        echo "Сначала загрузите бэкап на сервер:"
+        echo "  scp /путь/на/пк/hysteria-backup.tar.gz root@IP:/root/"
+        return 1
+    fi
+
+    warn "Восстановление перезапишет текущий конфиг и сертификаты."
+    read -p "  Продолжить? (y/n): " C
+    [ "$C" != "y" ] && return
+
+    local DIR="/root/hysteria-restore"
+    rm -rf "$DIR"
+    mkdir -p "$DIR"
+    tar xzf "$FILE" -C "$DIR" 2>/dev/null
+
+    # Определяем корень архива
+    local SRC
+    if [ -d "$DIR/hysteria-backup" ]; then
+        SRC="$DIR/hysteria-backup"
+    else
+        SRC="$DIR"
+    fi
+
+    log "Восстанавливаем конфиг и сертификаты..."
+    mkdir -p /etc/hysteria
+    [ -f "$SRC/config.yaml" ] && cp "$SRC/config.yaml" /etc/hysteria/
+    [ -f "$SRC/cert.pem" ] && cp "$SRC/cert.pem" /etc/hysteria/
+    [ -f "$SRC/key.pem" ] && cp "$SRC/key.pem" /etc/hysteria/
+
+    log "Восстанавливаем сервис systemd..."
+    if [ -f "$SRC/hysteria-server.service" ]; then
+        cp "$SRC/hysteria-server.service" /etc/systemd/system/
+        systemctl daemon-reload
+    fi
+
+    log "Восстанавливаем Let's Encrypt..."
+    if [ -d "$SRC/letsencrypt" ] && [ ! -d /etc/letsencrypt ]; then
+        mkdir -p /etc/letsencrypt
+        cp -r "$SRC/letsencrypt/"* /etc/letsencrypt/ 2>/dev/null
+    fi
+
+    log "Восстанавливаем h-ui (если есть)..."
+    if [ -d "$SRC/h-ui-data" ]; then
+        mkdir -p /h-ui/data
+        cp -r "$SRC/h-ui-data/"* /h-ui/data/ 2>/dev/null
+    fi
+    if [ -d "$SRC/h-ui-bin" ]; then
+        mkdir -p /usr/local/h-ui
+        cp -r "$SRC/h-ui-bin/"* /usr/local/h-ui/ 2>/dev/null
+        chmod +x /usr/local/h-ui/h-ui 2>/dev/null
+    fi
+
+    # Права на key.pem
+    fix_perm
+
+    log "Перезапускаем Hysteria..."
+    systemctl restart hysteria-server 2>/dev/null
+    sleep 3
+
+    if systemctl is-active --quiet hysteria-server; then
+        log "✅ Восстановление успешно!"
+        rm -rf "$DIR"
+    else
+        err "Hysteria не запустилась. Логи:"
+        journalctl -u hysteria-server -n 15 --no-pager
+    fi
+}
+
 #  МЕНЮ
 key_compact() {
     local FP
@@ -838,6 +973,8 @@ show_menu() {
     echo -e "  ${GREEN}7)${NC} ⚙️  Параметры (SNI, URL, пароли)"
     echo -e "  ${GREEN}8)${NC} 🔍 Проверки и инфо"
     echo -e "  ${GREEN}9)${NC} 📝 Редактировать конфиг (nano)"
+    echo -e "  ${GREEN}10)${NC} 💾 Бэкап (конфиг + сертификаты)"
+    echo -e "  ${GREEN}11)${NC} ♻️  Восстановить из бэкапа"
     echo -e "  ${GREEN}28)${NC} 🔄 Обновить скрипт из GitHub"
     echo ""
     echo -e "  ${RED}0)${NC}  Выход"
@@ -860,6 +997,8 @@ show_menu() {
         7)  params_menu ;;
         8)  checks_menu ;;
         9)  edit_config; pause ;;
+        10) backup_hysteria; pause ;;
+        11) restore_hysteria; pause ;;
         28) update_script; pause ;;
         0)  exit 0 ;;
         *)  echo -e "${RED}Неверный выбор${NC}"; sleep 1 ;;
