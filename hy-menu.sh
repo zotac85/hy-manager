@@ -207,11 +207,21 @@ EOF
     fi
 }
 
+fix_perm() {
+    chmod 644 /etc/hysteria/cert.pem 2>/dev/null
+    chmod 644 /etc/hysteria/config.yaml 2>/dev/null
+    if id hysteria &>/dev/null; then
+        chown root:hysteria /etc/hysteria/key.pem 2>/dev/null
+        chmod 640 /etc/hysteria/key.pem 2>/dev/null
+    fi
+}
+
 # ============================================================
 #  УПРАВЛЕНИЕ
 # ============================================================
 
 start_hysteria() {
+    fix_perm 2>/dev/null
     log "Запуск Hysteria..."
     systemctl daemon-reload
     systemctl enable hysteria-server > /dev/null 2>&1
@@ -598,6 +608,14 @@ show_menu() {
     local F_ST="❌"; systemctl is-active --quiet fail2ban 2>/dev/null && F_ST="✅"
     echo -e "${CYAN}------------------------------------------------------------${NC}"
     echo -e "  Hy:${H_ST}  h-ui:${U_ST}  Mimic:${M_ST}  UFW:${W_ST}  F2B:${F_ST}"
+    local IP=$(curl -4 -s --max-time 2 ifconfig.me 2>/dev/null || echo "n/a")
+    local UP=""
+    if systemctl is-active --quiet hysteria-server 2>/dev/null; then
+        UP=$(systemctl show hysteria-server -p ActiveEnterTimestamp --value 2>/dev/null | xargs -I{} date -d {} +"%H:%M" 2>/dev/null)
+        [ -n "$UP" ] && UP="  Hysteria с $UP"
+    fi
+    echo -e "${CYAN}------------------------------------------------------------${NC}"
+    echo -e "  IP: ${GREEN}$IP${NC}  Порт: ${GREEN}$PORT${NC}$UP"
     echo -e "${CYAN}------------------------------------------------------------${NC}"
     echo ""
     echo -e "${GREEN}🚀 БЫСТРЫЙ СТАРТ${NC}"
