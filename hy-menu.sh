@@ -1422,6 +1422,161 @@ check_network() {
     fi
 }
 
+generate_happ_json() {
+    local CERT="/etc/hysteria/cert.pem"
+    if [ ! -f "$CERT" ]; then
+        echo "ERROR: cert not found" >&2
+        return 1
+    fi
+    local FP
+    FP=$(openssl x509 -noout -fingerprint -sha256 -in "$CERT" 2>/dev/null | sed 's/^.*=//' | tr -d ':')
+    if [ -z "$FP" ]; then
+        echo "ERROR: cannot read fingerprint" >&2
+        return 1
+    fi
+    echo "hysteria2://$AUTH_PASS@$DOMAIN:$PORT/?sni=$SNI&obfs=salamander&obfs-password=$OBFS_PASS&pinSHA256=$FP#Hysteria"
+}
+
+GIST_ID_FILE="/root/.hysteria-gist-id"
+
+gist_create_or_update() {
+    local TOKEN=$(cat /root/.github-token 2>/dev/null)
+    if [ -z "$TOKEN" ]; then
+        err "Токен не найден в /root/.github-token"
+        return 1
+    fi
+
+    local CONTENT
+    CONTENT=$(generate_happ_json)
+    if [ -z "$CONTENT" ]; then
+        err "Не удалось сгенерировать содержимое"
+        return 1
+    fi
+
+    # Экранируем для JSON-запроса к API
+    local ESCAPED
+    ESCAPED=$(printf '%s' "$CONTENT" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
+
+    local GIST_ID=""
+    [ -f "$GIST_ID_FILE" ] && GIST_ID=$(cat "$GIST_ID_FILE")
+
+    if [ -z "$GIST_ID" ]; then
+        log "Создаём новый Gist..."
+        local RESPONSE=$(curl -s -X POST \
+            -H "Authorization: token $TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/gists \
+            -d "{\"description\":\"Hysteria2 subscription\",\"public\":false,\"files\":{\"hysteria.txt\":{\"content\":$ESCAPED}}}")
+
+        GIST_ID=$(echo "$RESPONSE" | grep -oP '"id":\s*"\K[^"]+' | head -1)
+        if [ -z "$GIST_ID" ]; then
+            err "Не удалось создать Gist"
+            echo "$RESPONSE" | head -10
+            return 1
+        fi
+        echo "$GIST_ID" > "$GIST_ID_FILE"
+        chmod 600 "$GIST_ID_FILE"
+        log "✅ Gist создан"
+    else
+        log "Обновляем Gist..."
+        local RESPONSE=$(curl -s -X PATCH \
+            -H "Authorization: token $TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/gists/$GIST_ID" \
+            -d "{\"files\":{\"hysteria.txt\":{\"content\":$ESCAPED}}}")
+
+        if echo "$RESPONSE" | grep -q '"id"'; then
+            log "✅ Gist обновлён"
+        else
+            err "Не удалось обновить Gist"
+            echo "$RESPONSE" | head -10
+            return 1
+        fi
+    fi
+
+    echo ""
+    echo -e "${CYAN}═══ URL для Happ ═══${NC}"
+    echo ""
+    echo -e "${GREEN}https://gist.githubusercontent.com/zotac85/$GIST_ID/raw/hysteria.txt${NC}"
+    echo ""
+    echo -e "${YELLOW}Добавьте этот URL в Happ как подписку.${NC}"
+}
+
+gist_show_url() {
+    local GIST_ID=""
+    [ -f "$GIST_ID_FILE" ] && GIST_ID=$(cat "$GIST_ID_FILE")
+
+    if [ -z "$GIST_ID" ]; then
+        warn "Gist ещё не создан. Выберите пункт 1."
+        return 1
+    fi
+
+    echo ""
+    echo -e "${CYAN}═══ URL подписки ═══${NC}"
+    echo ""
+    echo -e "${GREEN}https://gist.githubusercontent.com/zotac85/$GIST_ID/raw/hysteria.txt${NC}"
+    echo ""
+    echo -e "${YELLOW}Gist ID:${NC} $GIST_ID"
+    echo -e "${YELLOW}HTML:${NC}    https://gist.github.com/zotac85/$GIST_ID"
+}
+
+gist_delete() {
+    local TOKEN=$(cat /root/.github-token 2>/dev/null)
+    local GIST_ID=""
+    [ -f "$GIST_ID_FILE" ] && GIST_ID=$(cat "$GIST_ID_FILE")
+
+    if [ -z "$GIST_ID" ]; then
+        warn "Gist не создан"
+        return 1
+    fi
+
+    warn "Удалить Gist $GIST_ID?"
+    read -p "  Продолжить? (y/n): " C
+    [ "$C" != "y" ] && return
+
+    local CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE \
+        -H "Authorization: token $TOKEN" \
+        "https://api.github.com/gists/$GIST_ID")
+
+    if [ "$CODE" = "204" ]; then
+        rm -f "$GIST_ID_FILE"
+        log "✅ Gist удалён"
+    else
+        err "Ошибка удаления (HTTP $CODE)"
+    fi
+}
+
+gist_menu() {
+    while true; do
+        clear
+        echo -e "${CYAN}═══ 📱 Подписка для Happ ═══${NC}"
+        echo ""
+        local GIST_ID=""
+        [ -f "$GIST_ID_FILE" ] && GIST_ID=$(cat "$GIST_ID_FILE")
+
+        if [ -n "$GIST_ID" ]; then
+            echo -e "  Статус:  ${GREEN}✅ создана${NC}"
+            echo -e "  Gist ID: $GIST_ID"
+            echo -e "  URL:     ${YELLOW}https://gist.githubusercontent.com/zotac85/$GIST_ID/raw/hysteria.txt${NC}"
+        else
+            echo -e "  Статус:  ${RED}❌ не создана${NC}"
+        fi
+        echo ""
+        echo "  1) Создать / обновить подписку"
+        echo "  2) Показать URL для Happ"
+        echo "  3) Удалить подписку"
+        echo "  0) Назад"
+        echo ""
+        read -p "  Выбор: " c
+        case $c in
+            1) gist_create_or_update; pause ;;
+            2) gist_show_url; pause ;;
+            3) gist_delete; pause ;;
+            0) return ;;
+        esac
+    done
+}
+
 show_menu() {
     clear
     local H_ST="❌"; systemctl is-active --quiet hysteria-server 2>/dev/null && H_ST="✅"
@@ -1450,6 +1605,7 @@ show_menu() {
     echo -e "  ${GREEN}9)${NC} 📝 Редактировать конфиг (nano)"
     echo -e "  ${GREEN}10)${NC} 💾 Бэкап (конфиг + сертификаты)"
     echo -e "  ${GREEN}11)${NC} ♻️  Восстановить из бэкапа"
+    echo -e "  ${GREEN}14)${NC} 📱 Подписка для Happ (Gist)"
     echo -e "  ${GREEN}28)${NC} 🔄 Обновить скрипт из GitHub"
     echo ""
     echo -e "  ${RED}0)${NC}  Выход"
@@ -1474,6 +1630,7 @@ show_menu() {
         9)  edit_config; pause ;;
         10) backup_hysteria; pause ;;
         11) restore_hysteria; pause ;;
+        14) gist_menu ;;
         28) update_script; pause ;;
         0)  exit 0 ;;
         *)  echo -e "${RED}Неверный выбор${NC}"; sleep 1 ;;
