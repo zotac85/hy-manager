@@ -802,6 +802,16 @@ checks_menu() {
 }
 
 #  МЕНЮ
+key_compact() {
+    local FP
+    FP=$(openssl x509 -noout -fingerprint -sha256 -in /etc/hysteria/cert.pem 2>/dev/null | sed 's/^.*=//' | tr -d ':')
+    if [ -n "$FP" ]; then
+        echo "hysteria2://$AUTH_PASS@$DOMAIN:$PORT/?sni=$SNI&obfs=salamander&obfs-password=$OBFS_PASS&pinSHA256=$FP#Hysteria"
+    else
+        echo "hysteria2://$AUTH_PASS@$DOMAIN:$PORT/?sni=$SNI&obfs=salamander&obfs-password=$OBFS_PASS&insecure=1#Hysteria"
+    fi
+}
+
 # ============================================================
 show_menu() {
     clear
