@@ -95,7 +95,7 @@ get_cert() {
     log "Сертификат установлен (домен: $NEW_DOMAIN)"
 
     DOMAIN="$NEW_DOMAIN"
-    sed -i "s|^DOMAIN=.*|DOMAIN=\"$NEW_DOMAIN\"|" /root/hy-menu.sh
+    sed -i "s|^DOMAIN=.*|DOMAIN=\"$NEW_DOMAIN\"|" "$(readlink -f "$0")"
 }
 
 create_config() {
@@ -392,7 +392,7 @@ change_sni() {
         return
     fi
     SNI="$NEW_SNI"
-    sed -i "s|^SNI=.*|SNI=\"$NEW_SNI\"|" /root/hy-menu.sh
+    sed -i "s|^SNI=.*|SNI=\"$NEW_SNI\"|" "$(readlink -f "$0")"
     log "SNI изменён на: $NEW_SNI"
     warn "Не забудьте также изменить masquerade URL (пункт 15) и ключ в клиенте"
 }
@@ -405,7 +405,7 @@ change_masq_url() {
         return
     fi
     MASQ_URL="$NEW_URL"
-    sed -i "s|^MASQ_URL=.*|MASQ_URL=\"$NEW_URL\"|" /root/hy-menu.sh
+    sed -i "s|^MASQ_URL=.*|MASQ_URL=\"$NEW_URL\"|" "$(readlink -f "$0")"
 
     if [ -f /etc/hysteria/config.yaml ]; then
         sed -i "s|url: .*|url: $NEW_URL|" /etc/hysteria/config.yaml
@@ -421,14 +421,14 @@ change_passwords() {
     read NEW_AUTH
     if [ -n "$NEW_AUTH" ]; then
         AUTH_PASS="$NEW_AUTH"
-        sed -i "s|^AUTH_PASS=.*|AUTH_PASS=\"$NEW_AUTH\"|" /root/hy-menu.sh
+        sed -i "s|^AUTH_PASS=.*|AUTH_PASS=\"$NEW_AUTH\"|" "$(readlink -f "$0")"
     fi
 
     echo -n "Новый пароль obfs (Enter = оставить текущий): "
     read NEW_OBFS
     if [ -n "$NEW_OBFS" ]; then
         OBFS_PASS="$NEW_OBFS"
-        sed -i "s|^OBFS_PASS=.*|OBFS_PASS=\"$NEW_OBFS\"|" /root/hy-menu.sh
+        sed -i "s|^OBFS_PASS=.*|OBFS_PASS=\"$NEW_OBFS\"|" "$(readlink -f "$0")"
     fi
 
     if [ -f /etc/hysteria/config.yaml ]; then
@@ -593,8 +593,8 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-chmod +x /root/hy-menu.sh
-ln -sf /root/hy-menu.sh /usr/local/bin/hys
+chmod +x "$(readlink -f "$0")"
+ln -sf "$(readlink -f "$0")" /usr/local/bin/hys
 
 while true; do
     show_menu
