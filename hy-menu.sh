@@ -1435,6 +1435,7 @@ generate_happ_json() {
         return 1
     fi
     echo "hysteria2://$AUTH_PASS@$DOMAIN:$PORT/?sni=$SNI&obfs=salamander&obfs-password=$OBFS_PASS&pinSHA256=$FP#Hysteria"
+    echo "happ://routing/add/$(generate_routing_link)"
 }
 
 GIST_ID_FILE="/root/.hysteria-gist-id"
@@ -1565,6 +1566,7 @@ gist_menu() {
         echo "  1) Создать / обновить подписку"
         echo "  2) Показать URL для Happ"
         echo "  3) Удалить подписку"
+        echo "  4) Сгенерировать routing-ссылку для Happ"
         echo "  0) Назад"
         echo ""
         read -p "  Выбор: " c
@@ -1572,9 +1574,40 @@ gist_menu() {
             1) gist_create_or_update; pause ;;
             2) gist_show_url; pause ;;
             3) gist_delete; pause ;;
+            4) show_routing_link; pause ;;
             0) return ;;
         esac
     done
+}
+
+generate_routing_link() {
+    local TS=$(date +%s)
+    local JSON
+    JSON=$(cat << JSON_EOF
+{"Name":"TM-Direct","GlobalProxy":"true","RouteOrder":"block-proxy-direct","RemoteDNSType":"DoH","RemoteDNSDomain":"https://cloudflare-dns.com/dns-query","RemoteDNSIP":"1.1.1.1","DomesticDNSType":"DoH","DomesticDNSDomain":"https://dns.google/dns-query","DomesticDNSIP":"8.8.8.8","Geoipurl":"https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat","Geositeurl":"https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat","LastUpdated":"$TS","DnsHosts":{"cloudflare-dns.com":"1.1.1.1","dns.google":"8.8.8.8"},"DirectSites":[],"DirectIp":["10.0.0.0/8","172.16.0.0/12","192.168.0.0/16","169.254.0.0/16","224.0.0.0/4","255.255.255.255","geoip:tm"],"ProxySites":[],"ProxyIp":[],"BlockSites":[],"BlockIp":[],"DomainStrategy":"IPIfNonMatch","FakeDNS":"true","UseChunkFiles":"true"}
+JSON_EOF
+)
+    echo -n "$JSON" | base64 -w 0
+}
+
+show_routing_link() {
+    local B64
+    B64=$(generate_routing_link)
+
+    echo ""
+    echo -e "${CYAN}═══ Routing-профиль для Happ ═══${NC}"
+    echo ""
+    echo -e "  ${YELLOW}Правила:${NC}"
+    echo "    • geoip:tm → напрямую (Direct)"
+    echo "    • Локальные сети (10/8, 172.16/12, 192.168/16) → Direct"
+    echo "    • Всё остальное → через прокси"
+    echo ""
+    echo -e "${GREEN}Скопируйте ссылку ниже и откройте её в Happ:${NC}"
+    echo ""
+    echo "happ://routing/add/$B64"
+    echo ""
+    echo -e "${YELLOW}Или отправьте её себе в Telegram/заметки и откройте на телефоне.${NC}"
+    echo -e "${YELLOW}Happ предложит добавить профиль маршрутизации.${NC}"
 }
 
 show_menu() {
