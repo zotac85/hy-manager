@@ -1152,6 +1152,46 @@ change_domain() {
     fi
 }
 
+show_sysinfo() {
+    local UP=$(uptime -p 2>/dev/null | sed 's/^up //')
+    [ -z "$UP" ] && UP=$(uptime | awk -F'up ' '{print $2}' | awk -F',' '{print $1}')
+
+    local LOAD=$(cat /proc/loadavg | awk '{print $1", "$2", "$3}')
+
+    local CPU=$(top -bn1 | grep "Cpu(s)" | sed "s/.*, *\([0-9.]*\)%* id.*/\1/" | awk '{printf "%.0f", 100-$1}')
+    [ -z "$CPU" ] && CPU="?"
+
+    local RAM_TOTAL=$(free -h | awk 'NR==2{print $2}')
+    local RAM_USED_MB=$(free -h | awk 'NR==2{print $3}')
+    local RAM_PCT=$(free -m | awk 'NR==2{printf "%.0f", $3*100/$2}')
+
+    local DISK_USED=$(df -h / | awk 'NR==2{print $3}')
+    local DISK_TOTAL=$(df -h / | awk 'NR==2{print $2}')
+    local DISK_PCT=$(df -h / | awk 'NR==2{print $5}')
+
+    # Трафик с сетевого интерфейса
+    local IFACE=$(ip route | grep default | awk '{print $5}' | head -1)
+    [ -z "$IFACE" ] && IFACE="eth0"
+    local RX_BYTES=$(cat /proc/net/dev | grep "$IFACE:" | awk '{print $2}')
+    local TX_BYTES=$(cat /proc/net/dev | grep "$IFACE:" | awk '{print $10}')
+    local RX=$(numfmt --to=iec --suffix=B "$RX_BYTES" 2>/dev/null || echo "$RX_BYTES B")
+    local TX=$(numfmt --to=iec --suffix=B "$TX_BYTES" 2>/dev/null || echo "$TX_BYTES B")
+
+    local HVER="не установлена"
+    command -v hysteria &>/dev/null && HVER=$(hysteria version 2>/dev/null | grep -i "^Version:" | awk '{print $2}')
+
+    local CONNS="?"
+    if systemctl is-active --quiet hysteria-server 2>/dev/null; then
+        CONNS=$(ss -un 2>/dev/null | grep -c ":53" | tr -d '[:space:]')
+    fi
+
+    echo -e "${CYAN}──────────────────────────────────────────────────────────${NC}"
+    echo -e "  ${YELLOW}Uptime:${NC} $UP   ${YELLOW}Load:${NC} $LOAD"
+    echo -e "  ${YELLOW}CPU:${NC} ${CPU}%  ${YELLOW}RAM:${NC} ${RAM_PCT}%  ${YELLOW}Disk:${NC} ${DISK_PCT}"
+    echo -e "  ${YELLOW}Hysteria:${NC} $HVER  ${YELLOW}Conn:${NC} $CONNS  ${YELLOW}↓${NC} $RX  ${YELLOW}↑${NC} $TX"
+    echo -e "${CYAN}──────────────────────────────────────────────────────────${NC}"
+}
+
 key_compact() {
     local FP
     FP=$(openssl x509 -noout -fingerprint -sha256 -in /etc/hysteria/cert.pem 2>/dev/null | sed 's/^.*=//' | tr -d ':')
@@ -1177,6 +1217,7 @@ show_menu() {
     echo -e "${CYAN}══════════════════════════════════════════════════════════${NC}"
     echo -e "  ${GREEN}IP:${NC} $IP   ${GREEN}Порт:${NC} $PORT   ${GREEN}SNI:${NC} $SNI"
     echo -e "  Hy:$H_ST  h-ui:$U_ST  Mimic:$M_ST  UFW:$UFW_ST  F2B:$F2B_ST"
+    show_sysinfo
     echo -e "${CYAN}══════════════════════════════════════════════════════════${NC}"
     echo ""
     echo -e "  ${GREEN}1)${NC} 🚀 Полный автосетап"
