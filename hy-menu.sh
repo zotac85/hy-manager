@@ -272,23 +272,40 @@ show_logs() {
 # ============================================================
 
 setup_ufw() {
+    echo ""
     log "Настройка UFW..."
-    apt install -y ufw > /dev/null 2>&1
+
     local SSH_PORT
     SSH_PORT=$(ss -tlnp 2>/dev/null | grep sshd | awk '{print $4}' | awk -F: '{print $NF}' | head -1)
     [ -z "$SSH_PORT" ] && SSH_PORT=22
+    echo -e "  SSH-порт: ${GREEN}$SSH_PORT${NC}"
+    echo ""
 
-    ufw --force enable > /dev/null 2>&1
-    ufw default deny incoming > /dev/null 2>&1
-    ufw default allow outgoing > /dev/null 2>&1
-    ufw allow "$SSH_PORT"/tcp comment 'SSH' > /dev/null 2>&1
-    ufw allow "$PORT"/udp comment 'Hysteria2' > /dev/null 2>&1
-    ufw allow 80/tcp comment 'Masquerade HTTP' > /dev/null 2>&1
-    ufw allow 443/tcp comment 'Masquerade HTTPS' > /dev/null 2>&1
-    ufw allow "$HUI_PORT"/tcp comment 'h-ui Panel' > /dev/null 2>&1
-    ufw reload > /dev/null 2>&1
+    if ! command -v ufw &>/dev/null; then
+        log "Устанавливаем ufw..."
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ufw < /dev/null
+    fi
 
-    log "UFW настроен:"
+    log "Разрешаем SSH (порт $SSH_PORT)..."
+    ufw allow "$SSH_PORT"/tcp comment 'SSH' 2>&1 | head -3
+
+    log "Устанавливаем политики..."
+    ufw default deny incoming 2>&1 | head -1
+    ufw default allow outgoing 2>&1 | head -1
+
+    log "Разрешаем порты Hysteria и панели..."
+    ufw allow "$PORT"/udp comment 'Hysteria2' 2>&1 | head -1
+    ufw allow 80/tcp comment 'Masquerade HTTP' 2>&1 | head -1
+    ufw allow 443/tcp comment 'Masquerade HTTPS' 2>&1 | head -1
+    ufw allow "$HUI_PORT"/tcp comment 'h-ui Panel' 2>&1 | head -1
+
+    echo ""
+    log "Включаем UFW..."
+    echo "y" | ufw --force enable 2>&1 | head -3
+
+    echo ""
+    log "✅ UFW настроен"
+    echo ""
     ufw status verbose | head -20
 }
 
@@ -730,6 +747,8 @@ security_menu() {
         echo "  4) Fail2Ban: удалить"
         echo "  5) Показать статус UFW"
         echo "  6) Показать статус Fail2Ban"
+        echo "  7) 🌐 Оптимизация сети (BBR + буферы)"
+        echo "  8) 🔎 Показать сетевые настройки"
         echo "  0) Назад"
         read -p "  Выбор: " c
         case $c in
@@ -739,6 +758,8 @@ security_menu() {
             4) remove_fail2ban; pause ;;
             5) ufw status verbose; pause ;;
             6) fail2ban-client status sshd 2>/dev/null || echo "Fail2Ban не запущен"; pause ;;
+            7) optimize_network; pause ;;
+            8) check_network; pause ;;
             0) return ;;
         esac
     done
@@ -1203,6 +1224,132 @@ key_compact() {
 }
 
 # ============================================================
+optimize_network() {
+    echo ""
+    echo -e "${CYAN}=== Оптимизация сети ===${NC}"
+    echo ""
+
+    # Проверяем текущее состояние
+    local cur_cc=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)
+    local cur_qdisc=$(sysctl -n net.core.default_qdisc 2>/dev/null)
+    echo -e "  Сейчас: congestion=${YELLOW}$cur_cc${NC}  qdisc=${YELLOW}$cur_qdisc${NC}"
+    echo ""
+
+    read -p "  Применить оптимизацию (BBR + буферы)? (y/n): " C
+    [ "$C" != "y" ] && { warn "Отменено"; return; }
+
+    # Бэкап текущих настроек
+    local BACKUP="/root/net-optimize-backup-$(date +%Y%m%d-%H%M%S).conf"
+    {
+        echo "# Backup $(date)"
+        echo "net.ipv4.tcp_congestion_control = $cur_cc"
+        echo "net.core.default_qdisc = $cur_qdisc"
+    } > "$BACKUP"
+    log "Бэкап: $BACKUP"
+
+    log "Создаём конфиг /etc/sysctl.d/99-hysteria-optimize.conf..."
+
+    cat > /etc/sysctl.d/99-hysteria-optimize.conf << 'SYSCTL'
+# ============================================================
+# Hysteria2 Network Optimization
+# BBR + увеличенные буферы
+# ============================================================
+
+# --- BBR + fq ---
+net.core.default_qdisc = fq
+net.ipv4.tcp_congestion_control = bbr
+
+# --- UDP буферы (для QUIC/Hysteria) ---
+net.core.rmem_max = 16777216
+net.core.wmem_max = 16777216
+net.core.rmem_default = 262144
+net.core.wmem_default = 262144
+
+# --- TCP буферы ---
+net.ipv4.tcp_rmem = 4096 87380 16777216
+net.ipv4.tcp_wmem = 4096 65536 16777216
+
+# --- Очереди и бэклог ---
+net.core.netdev_max_backlog = 100000
+net.core.somaxconn = 65535
+
+# --- TCP оптимизация ---
+net.ipv4.tcp_fastopen = 3
+net.ipv4.tcp_slow_start_after_idle = 0
+net.ipv4.tcp_tw_reuse = 1
+net.ipv4.tcp_fin_timeout = 15
+net.ipv4.tcp_mtu_probing = 1
+
+# --- Файловые дескрипторы ---
+fs.file-max = 1000000
+SYSCTL
+
+    log "Применяем настройки..."
+    sysctl --system > /dev/null 2>&1
+
+    # Проверяем результат
+    sleep 1
+    local new_cc=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)
+    local new_qdisc=$(sysctl -n net.core.default_qdisc 2>/dev/null)
+    local new_rmem=$(sysctl -n net.core.rmem_max 2>/dev/null)
+
+    echo ""
+    echo -e "${CYAN}─── Результат ───${NC}"
+    if [ "$new_cc" = "bbr" ]; then
+        log "BBR: ${GREEN}включён${NC}"
+    else
+        err "BBR: ${RED}не включён${NC} (текущий: $new_cc)"
+        warn "Возможно, ядро не поддерживает BBR. Проверьте: uname -r"
+    fi
+    if [ "$new_qdisc" = "fq" ]; then
+        log "qdisc: ${GREEN}fq${NC}"
+    else
+        warn "qdisc: $new_qdisc (ожидался fq)"
+    fi
+    log "UDP rmem_max: ${GREEN}$new_rmem${NC}"
+
+    echo ""
+    echo -e "${YELLOW}Настройки сохранены в /etc/sysctl.d/99-hysteria-optimize.conf${NC}"
+    echo -e "${YELLOW}Применятся автоматически при загрузке.${NC}"
+
+    # Перезапускаем Hysteria (буферы применятся к новым сокетам)
+    if systemctl is-active --quiet hysteria-server 2>/dev/null; then
+        echo ""
+        read -p "  Перезапустить Hysteria сейчас? (y/n): " R
+        if [ "$R" = "y" ]; then
+            systemctl restart hysteria-server
+            sleep 2
+            systemctl is-active --quiet hysteria-server && log "✅ Hysteria перезапущена" || err "Hysteria не запустилась"
+        fi
+    fi
+}
+
+check_network() {
+    echo ""
+    echo -e "${CYAN}=== Текущие сетевые настройки ===${NC}"
+    echo ""
+    echo -e "  ${YELLOW}Congestion control:${NC} $(sysctl -n net.ipv4.tcp_congestion_control)"
+    echo -e "  ${YELLOW}qdisc:${NC}              $(sysctl -n net.core.default_qdisc)"
+    echo ""
+    echo -e "  ${YELLOW}UDP буферы:${NC}"
+    echo -e "    rmem_max: $(sysctl -n net.core.rmem_max)"
+    echo -e "    wmem_max: $(sysctl -n net.core.wmem_max)"
+    echo ""
+    echo -e "  ${YELLOW}TCP буферы:${NC}"
+    echo -e "    tcp_rmem: $(sysctl -n net.ipv4.tcp_rmem)"
+    echo -e "    tcp_wmem: $(sysctl -n net.ipv4.tcp_wmem)"
+    echo ""
+    echo -e "  ${YELLOW}Fast Open:${NC} $(sysctl -n net.ipv4.tcp_fastopen)"
+    echo -e "  ${YELLOW}File max:${NC}  $(sysctl -n fs.file-max)"
+    echo ""
+    # Проверка поддержки BBR
+    if sysctl net.ipv4.tcp_available_congestion_control | grep -q bbr; then
+        log "BBR поддерживается ядром"
+    else
+        err "BBR НЕ поддерживается ядром"
+    fi
+}
+
 show_menu() {
     clear
     local H_ST="❌"; systemctl is-active --quiet hysteria-server 2>/dev/null && H_ST="✅"
@@ -1224,7 +1371,7 @@ show_menu() {
     echo -e "  ${GREEN}2)${NC} 🔧 Hysteria2"
     echo -e "  ${GREEN}3)${NC} 🎛️  Панель h-ui"
     echo -e "  ${GREEN}4)${NC} 🌐 Mimic (UDP→TCP)"
-    echo -e "  ${GREEN}5)${NC} 🛡️  Безопасность (UFW, Fail2Ban)"
+    echo -e "  ${GREEN}5)${NC} 🛡️  Безопасность и сеть"
     echo -e "  ${GREEN}6)${NC} 📜 Сертификаты"
     echo -e "  ${GREEN}7)${NC} ⚙️  Параметры (SNI, URL, пароли)"
     echo -e "  ${GREEN}8)${NC} 🔍 Проверки и инфо"
