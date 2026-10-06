@@ -623,6 +623,15 @@ update_script() {
     warn "Перезапустите меню: выйдите (0) и запустите hys снова"
 }
 
+show_version() {
+    local V=""
+    if command -v hysteria &>/dev/null; then
+        V=$(hysteria version 2>/dev/null | grep -i "^Version:" | awk '{print $2}')
+    fi
+    [ -z "$V" ] && V="не установлена"
+    echo -e "  Текущая версия: ${GREEN}$V${NC}"
+}
+
 hysteria_menu() {
     while true; do
         clear
@@ -630,13 +639,15 @@ hysteria_menu() {
         local st="❌ не работает"; systemctl is-active --quiet hysteria-server 2>/dev/null && st="✅ работает"
         echo -e "  Статус: $st"
         echo -e "  Порт 53: $(ss -ulpn 2>/dev/null | grep -q ':53 ' && echo '✅ занят' || echo '❌ свободен')"
+        show_version
         echo ""
         echo "  1) Установить"
         echo "  2) Запустить"
         echo "  3) Перезапустить"
         echo "  4) Остановить"
         echo "  5) Логи (30 строк)"
-        echo "  6) Удалить"
+        echo "  6) Обновить / сменить версию"
+        echo "  7) Удалить"
         echo "  0) Назад"
         read -p "  Выбор: " c
         case $c in
@@ -645,7 +656,8 @@ hysteria_menu() {
             3) systemctl restart hysteria-server && log "Перезапущена"; pause ;;
             4) systemctl stop hysteria-server && log "Остановлена"; pause ;;
             5) journalctl -u hysteria-server -n 30 --no-pager; pause ;;
-            6) remove_hysteria; pause ;;
+            6) update_hysteria; pause ;;
+            7) remove_hysteria; pause ;;
             0) return ;;
         esac
     done
@@ -936,6 +948,130 @@ restore_hysteria() {
         err "Hysteria не запустилась. Логи:"
         journalctl -u hysteria-server -n 15 --no-pager
     fi
+}
+
+
+update_hysteria() {
+    show_version
+    echo ""
+    echo "  1) Обновить до последней версии"
+    echo "  2) Установить конкретную версию (из списка)"
+    echo "  3) Проверить наличие обновления"
+    echo "  0) Назад"
+    read -p "  Выбор: " c
+    case $c in
+        1) update_hysteria_latest ;;
+        2) update_hysteria_pick ;;
+        3) check_hysteria_update ;;
+        0) return ;;
+        *) return ;;
+    esac
+}
+
+update_hysteria_latest() {
+    log "Установка последней версии Hysteria2..."
+    bash <(curl -fsSL https://get.hy2.sh/) > /dev/null 2>&1
+    if systemctl is-active --quiet hysteria-server; then
+        systemctl restart hysteria-server
+        sleep 2
+    fi
+    echo ""
+    show_version
+    systemctl is-active --quiet hysteria-server && log "✅ Hysteria работает" || err "Hysteria не запущена"
+}
+
+check_hysteria_update() {
+    log "Проверяем последнюю версию на GitHub..."
+    local LATEST=$(curl -sL --max-time 10 "https://api.github.com/repos/apernet/hysteria/releases/latest" | grep -oP '"tag_name":\s*"\K[^"]+' | head -1)
+    LATEST="${LATEST#app/}"
+    local CURRENT=""
+    if command -v hysteria &>/dev/null; then
+        CURRENT=$(hysteria version 2>/dev/null | grep -i "^Version:" | awk '{print $2}')
+    fi
+    echo ""
+    echo -e "  Установлена: ${YELLOW}${CURRENT:-нет}${NC}"
+    echo -e "  На GitHub:   ${GREEN}${LATEST:-не удалось узнать}${NC}"
+    echo ""
+    if [ -n "$LATEST" ] && [ "v$CURRENT" = "$LATEST" ]; then
+        log "У вас последняя версия"
+    elif [ -n "$LATEST" ]; then
+        warn "Доступно обновление до $LATEST"
+    fi
+}
+
+update_hysteria_pick() {
+    log "Загружаем список версий с GitHub..."
+    local VERSIONS=$(curl -sL --max-time 10 "https://api.github.com/repos/apernet/hysteria/releases?per_page=15" | grep -oP '"tag_name":\s*"\K[^"]+' | head -15)
+
+    if [ -z "$VERSIONS" ]; then
+        err "Не удалось получить список версий"
+        return 1
+    fi
+
+    echo ""
+    echo -e "${CYAN}Доступные версии:${NC}"
+    local i=1
+    for v in $VERSIONS; do
+        echo "  $i) ${v#app/}"
+        i=$((i+1))
+    done
+    echo "  0) Назад"
+    echo ""
+    read -p "  Выберите номер: " N
+
+    [ "$N" = "0" ] && return
+    [ -z "$N" ] && return
+
+    local SELECTED=$(echo "$VERSIONS" | sed -n "${N}p")
+    if [ -z "$SELECTED" ]; then
+        err "Неверный номер"
+        return 1
+    fi
+
+    warn "Будет установлена версия: $SELECTED"
+    read -p "  Продолжить? (y/n): " C
+    [ "$C" != "y" ] && return
+
+    log "Скачиваем $SELECTED..."
+
+    # Определяем архитектуру
+    local ARCH=$(uname -m)
+    case "$ARCH" in
+        x86_64) DEB_ARCH="amd64" ;;
+        aarch64) DEB_ARCH="arm64" ;;
+        *) err "Неподдерживаемая архитектура: $ARCH"; return 1 ;;
+    esac
+
+    local URL="https://github.com/apernet/hysteria/releases/download/app/${SELECTED}/hysteria-linux-${DEB_ARCH}"
+    local TMP="/tmp/hysteria-new"
+
+    if ! curl -fsSL "$URL" -o "$TMP"; then
+        err "Не удалось скачать $SELECTED"
+        return 1
+    fi
+
+    if [ ! -s "$TMP" ]; then
+        err "Скачанный файл пустой"
+        rm -f "$TMP"
+        return 1
+    fi
+
+    # Бэкап текущего
+    if [ -f /usr/local/bin/hysteria ]; then
+        cp /usr/local/bin/hysteria /usr/local/bin/hysteria.bak
+        log "Бэкап: /usr/local/bin/hysteria.bak"
+    fi
+
+    chmod +x "$TMP"
+    mv "$TMP" /usr/local/bin/hysteria
+
+    log "Перезапуск Hysteria..."
+    systemctl restart hysteria-server
+    sleep 3
+
+    echo ""
+    show_version
+    systemctl is-active --quiet hysteria-server && log "✅ Hysteria работает" || err "Hysteria не запустилась"
 }
 
 #  МЕНЮ
