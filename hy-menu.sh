@@ -1610,6 +1610,23 @@ show_routing_link() {
     echo -e "${YELLOW}Happ предложит добавить профиль маршрутизации.${NC}"
 }
 
+optimize_all() {
+    if [ ! -x /usr/local/bin/hysteria-optimize.sh ]; then
+        err "Скрипт /usr/local/bin/hysteria-optimize.sh не найден"
+        return 1
+    fi
+    export HY_PORT="$PORT"
+    echo ""
+    read -p "  Введите IP вашей машины для whitelist Fail2ban (Enter = пропустить): " WL_IP
+    echo ""
+    warn "Скрипт выполнится полностью. Начнём?"
+    read -p "  Продолжить? (y/n): " C
+    [ "$C" != "y" ] && return
+    /usr/local/bin/hysteria-optimize.sh "$WL_IP"
+    echo ""
+    read -p "  Нажмите Enter..." _
+}
+
 show_menu() {
     clear
     local H_ST="❌"; systemctl is-active --quiet hysteria-server 2>/dev/null && H_ST="✅"
@@ -1639,7 +1656,8 @@ show_menu() {
     echo -e "  ${GREEN}10)${NC} 💾 Бэкап (конфиг + сертификаты)"
     echo -e "  ${GREEN}11)${NC} ♻️  Восстановить из бэкапа"
     echo -e "  ${GREEN}14)${NC} 📱 Подписка для Happ (Gist)"
-    echo -e "  ${GREEN}28)${NC} 🔄 Обновить скрипт из GitHub"
+    echo -e "  ${GREEN}15)${NC} 🔄 Обновить скрипт из GitHub"
+    echo -e "  ${YELLOW}16)${NC} ⚡ Оптимизировать всё (apt, BBR, Brutal, swap)"
     echo ""
     echo -e "  ${RED}0)${NC}  Выход"
     echo ""
@@ -1664,7 +1682,8 @@ show_menu() {
         10) backup_hysteria; pause ;;
         11) restore_hysteria; pause ;;
         14) gist_menu ;;
-        28) update_script; pause ;;
+        15) update_script; pause ;;
+        16) optimize_all; pause ;;
         0)  exit 0 ;;
         *)  echo -e "${RED}Неверный выбор${NC}"; sleep 1 ;;
     esac
