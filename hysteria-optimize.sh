@@ -192,7 +192,7 @@ main() {
     do_ufw
     do_fail2ban
     do_bbr
-    do_brutal
+    # do_brutal  # ОТКЛЮЧЕНО: конфликтует со встроенным Brutal в Hysteria2
     do_buffers
     do_swap
     print_footer
