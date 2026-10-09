@@ -10,6 +10,8 @@ REPO="https://raw.githubusercontent.com/zotac85/hy-manager/main"
 
 echo -e "${CYAN}>>> Скачиваем скрипт управления...${NC}"
 curl -fsSL "$REPO/hy-menu.sh" -o /usr/local/bin/hy-menu.sh
+curl -fsSL "$REPO/hysteria-optimize.sh" -o /usr/local/bin/hysteria-optimize.sh
+chmod +x /usr/local/bin/hysteria-optimize.sh
 
 if [ ! -s /usr/local/bin/hy-menu.sh ]; then
     echo -e "${RED}Ошибка: не удалось скачать hy-menu.sh${NC}"
